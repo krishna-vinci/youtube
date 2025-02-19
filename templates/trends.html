@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Trends - YouTube Workflow{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <h1 class="text-3xl font-bold">Trends - {{ source | capitalize }}</h1>
+  <!-- Source Toggle Buttons -->
+  <div class="mt-4 space-x-4">
+    <a href="/trends?source=reddit"
+       class="px-4 py-2 rounded transition {{ 'bg-blue-500 text-white' if source == 'reddit' else 'bg-gray-200 text-gray-700' }}">
+      Reddit
+    </a>
+    <a href="/trends?source=youtube"
+       class="px-4 py-2 rounded transition {{ 'bg-blue-500 text-white' if source == 'youtube' else 'bg-gray-200 text-gray-700' }}">
+      YouTube
+    </a>
+    <a href="/trends?source=twitter"
+       class="px-4 py-2 rounded transition {{ 'bg-blue-500 text-white' if source == 'twitter' else 'bg-gray-200 text-gray-700' }}">
+      Twitter
+    </a>
+  </div>
+</div>
+
+{% if channels %}
+  <!-- Loop over each channel -->
+  {% for channel in channels %}
+  <div class="mb-8">
+    <h2 class="text-2xl font-bold mb-2">{{ channel.name }}</h2>
+    <div class="overflow-x-auto">
+      <div class="flex space-x-4 pb-4">
+        {% for item in channel.feed_items %}
+        <div class="flex-none bg-white rounded-lg shadow transition duration-300 p-3 w-72">
+          <!-- Thumbnail with fixed height -->
+          <img src="{{ item.thumbnail }}" alt="Thumbnail" class="w-full h-40 object-cover rounded-md">
+          <!-- Full title with link -->
+          <h3 class="mt-2 text-lg font-semibold">
+            <a href="{{ item.link }}" target="_blank" class="hover:underline">{{ item.title }}</a>
+          </h3>
+          <!-- Published Date -->
+          <p class="text-sm text-gray-500 mt-1">{{ item.published }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <p>No channels found for this source.</p>
+{% endif %}
+{% endblock %}
