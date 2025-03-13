@@ -65,8 +65,15 @@ FEED_CATEGORIES = {
             "name": "New Scientist",
             "url": "https://feeds.newscientist.com/science-news"
         }
+    ],
+    "Hindu Sci and Tech": [
+        {
+            "name": "The Hindu Sci & Tech",
+            "url": "https://www.thehindu.com/sci-tech/technology/?service=rss"
+        }
     ]
 }
+
 
 def format_datetime(dt_string):
     """Convert RSS datetime to a friendly format (Today, Yesterday, or full date)."""
@@ -85,37 +92,32 @@ def format_datetime(dt_string):
 
 
 def parse_rss_feed(rss_url: str):
-    """Fetch and parse the RSS feed from the given URL."""
-    feed = feedparser.parse(rss_url)
+    import requests
+    # Use a common browser User-Agent
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    response = requests.get(rss_url, headers=headers, timeout=10)
+    response.raise_for_status()
+    feed = feedparser.parse(response.content)
     items = []
     for entry in feed.entries:
         title = getattr(entry, "title", "Untitled")
         link = getattr(entry, "link", "#")
-        # Some feeds have full text in "content:encoded" or "content"
         description = getattr(entry, "summary", "No description available.")
-
-        # Attempt to extract a thumbnail from RSS tags
         thumbnail_url = None
         if "media_thumbnail" in entry:
             thumbnail_url = entry.media_thumbnail[0].get("url")
         elif "media_content" in entry:
             thumbnail_url = entry.media_content[0].get("url")
-
-        # If we still don't have a thumbnail, try scanning the description HTML for an <img>
         if not thumbnail_url and "<img" in description:
             start = description.find("<img")
             src_start = description.find('src="', start) + 5
             src_end = description.find('"', src_start)
             if src_start > 4 and src_end > src_start:
                 thumbnail_url = description[src_start:src_end]
-
-        # Fallback if no thumbnail
         if not thumbnail_url:
             thumbnail_url = DEFAULT_THUMBNAIL
-
         raw_published = getattr(entry, "published", "No date")
         published = format_datetime(raw_published)
-
         items.append({
             "title": title,
             "link": link,
@@ -124,6 +126,7 @@ def parse_rss_feed(rss_url: str):
             "published": published
         })
     return items
+
 
 @app.get("/feeds", response_class=HTMLResponse)
 async def feeds(request: Request):
@@ -143,19 +146,22 @@ async def feeds(request: Request):
 @app.get("/article-full-text")
 async def article_full_text(url: str):
     """
-    Fetch the full text of an article via newspaper's fulltext().
-    Returns JSON with either "content" or "error".
+    Fetch and return the article's body HTML with preserved semantic formatting,
+    using Newspaper3k's keep_article_html=True option.
     """
-    import requests
-    from newspaper import fulltext
-    
     try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()  # Raise an error if 4xx/5xx
-        text = fulltext(resp.text)
-        return JSONResponse({"content": text})
+        a = Article(url, keep_article_html=True)
+        a.download()
+        a.parse()
+        # Try to get the extracted article body HTML.
+        content_html = a.article_html.strip() if a.article_html else ""
+        if not content_html:
+            # Fallback: wrap plain text in <p> tags if extraction fails.
+            content_html = "<p>" + a.text.replace("\n", "</p><p>") + "</p>"
+        return JSONResponse({"content": content_html})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 
 from newspaper import Article
@@ -226,19 +232,18 @@ FEED_CATEGORIES = {
         {
             "name": "TechCrunch",
             "url": "https://techcrunch.com/feed/"
-        },
-
-        {
-            "name": "wired",
-            "url": "https://www.wired.com/feed/rss"
         }
-
-
     ],
     "Science": [
         {
             "name": "New Scientist",
-            "url": "https://www.wired.com/feed/rss"
+            "url": "https://feeds.newscientist.com/science-news"
+        }
+    ],
+    "Hindu Sci and Tech": [
+        {
+            "name": "The Hindu Sci & Tech",
+            "url": "https://www.thehindu.com/sci-tech/technology/?service=rss"
         }
     ]
 }

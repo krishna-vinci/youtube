@@ -160,7 +160,6 @@
 
 <!-- COLUMN (SPLIT) VIEW -->
 <div id="column-view" class="hidden h-screen flex flex-col">
-  <!-- Main Split: No duplicate header; using same header row as above -->
   <div class="flex flex-grow overflow-hidden">
     <!-- Left Column: Article List -->
     <div id="article-list" class="w-1/3 border-r overflow-y-auto p-2 sm:p-3 md:p-4 bg-base-200">
@@ -272,7 +271,7 @@
     });
   }
 
-  // Load Full Article (plain text) for Card/Headline modals
+  // Load Full Article for Card/Headline (use HTML formatting)
   async function loadFullArticle(articleUrl, modalId) {
     const modalContent = document.getElementById('modal-content-' + modalId);
     modalContent.innerHTML = "<p>Loading...</p>";
@@ -280,9 +279,7 @@
       const response = await fetch(`/article-full-text?url=${encodeURIComponent(articleUrl)}`);
       const data = await response.json();
       if (data.content) {
-        const paragraphs = data.content.split("\n\n");
-        const formatted = paragraphs.map(p => `<p class="mb-2">${p}</p>`).join("");
-        modalContent.innerHTML = formatted;
+        modalContent.innerHTML = data.content;
       } else if (data.error) {
         modalContent.innerHTML = `<p class="text-red-500">Error: ${data.error}</p>`;
       } else {
@@ -294,13 +291,13 @@
     }
   }
 
-  // Column View: Clicking row (outside link) loads HTML
+  // Column View: Clicking row loads HTML
   function handleRowClick(event, articleUrl, rowEl) {
     loadArticleHtml(articleUrl, rowEl);
     highlightRow(rowEl);
   }
 
-  // Column View: Visually highlight selected row
+  // Column View: Highlight selected row
   function highlightRow(selectedEl) {
     const articleItems = document.querySelectorAll('.article-item');
     articleItems.forEach(item => {
@@ -314,10 +311,10 @@
     const detailContainer = document.getElementById('detail-content');
     detailContainer.innerHTML = "<p>Loading article...</p>";
     try {
-      const response = await fetch(`/article-full-html?url=${encodeURIComponent(articleUrl)}`);
+      const response = await fetch(`/article-full-text?url=${encodeURIComponent(articleUrl)}`);
       const data = await response.json();
-      if (data.html) {
-        detailContainer.innerHTML = data.html;
+      if (data.content) {
+        detailContainer.innerHTML = data.content;
       } else if (data.error) {
         detailContainer.innerHTML = `<p class="text-red-500">Error: ${data.error}</p>`;
       } else {
@@ -361,7 +358,7 @@
   .animate-fadeInOut {
     animation: fadeInOut 2s ease-in-out forwards;
   }
-  /* Ensure paragraphs in detail pane have spacing */
+  /* Ensure paragraphs in the detail pane have spacing */
   .prose p {
     margin: 0.5em 0;
   }
