@@ -30,7 +30,16 @@ import markdown2
 from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Request, HTTPException, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
+import requests, os
+from starlette.concurrency import run_in_threadpool
+import logging
 
+# Caching packages from fastapi-cache
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
+from fastapi_cache.decorator import cache
 
 import os
 from datetime import datetime, timedelta
@@ -48,9 +57,24 @@ from datetime import datetime
 from fastapi import Form, HTTPException
 from newspaper import Article
 import html2text
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # This will load variables from a .env file into the environment
+
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
+if not PIXABAY_API_KEY:
+    raise Exception("PIXABAY_API_KEY is not set in the environment.")
+
+
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+
+# Initialize caching on startup (In production, consider using Redis or another backend)
+@app.on_event("startup")
+async def startup():
+    FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
 
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
 
@@ -254,8 +278,14 @@ async def project_names(category: str):
                 projects.append(proj)
     return JSONResponse({"projects": projects})
 
+
+
 @app.get("/projects", response_class=HTMLResponse)
 async def projects_view(request: Request):
+    """
+    Lists all categories (subfolders in PROJECTS_ROOT) and their projects,
+    displaying only the project title and a preview (file listing).
+    """
     projects_info = []
     if os.path.isdir(PROJECTS_ROOT):
         for category in os.listdir(PROJECTS_ROOT):
@@ -265,12 +295,9 @@ async def projects_view(request: Request):
                 for proj in os.listdir(cat_path):
                     proj_path = os.path.join(cat_path, proj)
                     if os.path.isdir(proj_path):
-                        md_file = os.path.join(proj_path, f"{proj}.md")
-                        snippet = ""
-                        if os.path.exists(md_file):
-                            with open(md_file, "r", encoding="utf-8") as f:
-                                snippet = f.read()[:200]
-                        project_list.append({"project": proj, "snippet": snippet})
+                        # Optionally, you can preview the MD file snippet if needed.
+                        # For now, we only list the project name.
+                        project_list.append({"project": proj})
                 projects_info.append({"category": category, "projects": project_list})
     return templates.TemplateResponse("projects.html", {
         "request": request,
@@ -284,12 +311,16 @@ async def create_project_endpoint(
     category: str = Form(...),
     project_title: str = Form(...)
 ):
+    """
+    Creates a new project folder under the specified category, and initializes a .md file.
+    """
     category_folder = os.path.join(PROJECTS_ROOT, category)
     project_folder = os.path.join(category_folder, project_title)
     try:
         os.makedirs(project_folder, exist_ok=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating project folder: {str(e)}")
+    
     md_file_path = os.path.join(project_folder, f"{project_title}.md")
     if not os.path.exists(md_file_path):
         try:
@@ -297,32 +328,36 @@ async def create_project_endpoint(
                 f.write(f"# {project_title}\n\nCreated on: {datetime.now()}\n")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error creating Markdown file: {str(e)}")
+    
     return RedirectResponse(f"/projects/{category}/{project_title}", status_code=303)
 
 @app.get("/projects/{category}/{project}", response_class=HTMLResponse)
 async def view_project_detail(request: Request, category: str, project: str):
+    """
+    Displays the project detail page, showing:
+    - The project title.
+    - A listing of files in the project folder.
+    - (Optionally) an embedded MeTube iframe.
+    - A button to launch Pixabay search (to download images/videos directly into this project).
+    """
     project_path = os.path.join(PROJECTS_ROOT, category, project)
     if not os.path.isdir(project_path):
         return HTMLResponse("Project not found", status_code=404)
-    md_file_path = os.path.join(project_path, f"{project}.md")
-    markdown_content = ""
-    if os.path.exists(md_file_path):
-        with open(md_file_path, "r", encoding="utf-8") as f:
-            markdown_content = f.read()
-    html_content = markdown2.markdown(markdown_content) if markdown_content else ""
+    
     files_in_project = []
     for item in os.listdir(project_path):
         item_path = os.path.join(project_path, item)
-        if os.path.isfile(item_path) and item != f"{project}.md":
+        if os.path.isfile(item_path):
             files_in_project.append(item)
+    
     return templates.TemplateResponse("project_detail.html", {
         "request": request,
         "category": category,
         "project": project,
-        "html_content": html_content,
         "files_in_project": files_in_project,
         "metube_url": "http://192.168.0.114:8081"
     })
+
 
 @app.get("/projects/{category}/{project}/content", response_class=HTMLResponse)
 async def project_content(category: str, project: str):
@@ -430,3 +465,116 @@ async def add_article_to_project(
         raise HTTPException(status_code=500, detail=f"Error appending to Markdown file: {str(e)}")
 
     return {"status": "success", "message": "Article added to project with images"}
+
+
+
+
+###pixsbay#############
+
+# Cached helper function for Pixabay search (caches for 24 hours)
+@cache(expire=86400)
+async def get_pixabay_results(q: str, media_type: str, page: int):
+    if media_type == "image":
+        url = "https://pixabay.com/api/"
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "image_type": "photo",
+            "per_page": 12,
+            "page": page,
+            "safesearch": "true"
+        }
+    else:
+        url = "https://pixabay.com/api/videos/"
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "per_page": 12,
+            "page": page,
+            "safesearch": "true"
+        }
+    resp = await run_in_threadpool(requests.get, url, params=params, timeout=10)
+    await run_in_threadpool(resp.raise_for_status)
+    data = await run_in_threadpool(resp.json)
+    return data.get("hits", [])
+
+@app.get("/pixabay", response_class=HTMLResponse)
+async def pixabay_search(
+    request: Request,
+    category: str,
+    project: str,
+    q: str = "",
+    media_type: str = "image",
+    page: int = 1  # Pagination parameter
+):
+    results = []
+    error_msg = ""
+    if q.strip():
+        try:
+            results = await get_pixabay_results(q, media_type, page)
+        except Exception as e:
+            logging.exception("Error searching Pixabay")
+            error_msg = f"Error searching Pixabay: {str(e)}"
+    
+    return templates.TemplateResponse("pixabay.html", {
+        "request": request,
+        "category": category,
+        "project": project,
+        "q": q,
+        "media_type": media_type,
+        "page": page,
+        "results": results,
+        "error_msg": error_msg
+    })
+
+# Helper function to write file content (offloaded to a thread)
+def write_file(path, content):
+    with open(path, "wb") as f:
+        f.write(content)
+
+@app.post("/pixabay/download")
+async def pixabay_download(
+    request: Request,
+    category: str = Form(...),
+    project: str = Form(...),
+    download_url: str = Form(...),
+    filename: str = Form(...)
+):
+    project_folder = os.path.join(PROJECTS_ROOT, category, project)
+    if not os.path.isdir(project_folder):
+        raise HTTPException(status_code=404, detail="Project folder not found")
+    
+    local_path = os.path.join(project_folder, filename)
+    
+    # Download file off-thread
+    try:
+        resp = await run_in_threadpool(requests.get, download_url, timeout=10)
+        await run_in_threadpool(resp.raise_for_status)
+        content = resp.content
+        await run_in_threadpool(write_file, local_path, content)
+    except Exception as e:
+        logging.exception("Error downloading file")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+
+    # If this is an HTMX request, return minimal HTML to update the UI
+    if request.headers.get("HX-Request"):
+        # Return a small snippet, for instance:
+        return HTMLResponse(
+            f"""
+            <div class="alert alert-success shadow-lg mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" 
+                   fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                      d="M9 12l2 2 4-4" />
+              </svg>
+              <span>Saved <strong>{filename}</strong> to <strong>{category}/{project}</strong>.</span>
+            </div>
+            """,
+            status_code=200
+        )
+    else:
+        # Fallback: if not HTMX, redirect to the pixabay page
+        return RedirectResponse(
+            url=f"/pixabay?category={category}&project={project}&downloaded={filename}",
+            status_code=303
+        )
