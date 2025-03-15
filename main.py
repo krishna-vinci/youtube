@@ -1,64 +1,24 @@
-import feedparser
-from datetime import datetime, timedelta
-from dateutil import parser as date_parser
 import os
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-import feedparser
-import requests
-from datetime import datetime, timedelta
-from dateutil import parser as date_parser
-from newspaper import Article  # from newspaper3k
-from newspaper import fulltext
-from newspaper import Article
-
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi import Form
-from fastapi.responses import RedirectResponse
-import os
-from fastapi import Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
-from datetime import datetime
-import markdown2
-import os
-from datetime import datetime
-
-import markdown2
-from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
-from fastapi import FastAPI, Request, HTTPException, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
-import requests, os
-from starlette.concurrency import run_in_threadpool
 import logging
-
-# Caching packages from fastapi-cache
-from fastapi_cache import FastAPICache
-from fastapi_cache.backends.inmemory import InMemoryBackend
-from fastapi_cache.decorator import cache
-
-import os
 from datetime import datetime, timedelta
+from dateutil import parser as date_parser
 
 import feedparser
 import requests
-from dateutil import parser as date_parser
+import markdown2
+import html2text
+from newspaper import Article, fulltext
+
+from dotenv import load_dotenv
+
 from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from newspaper import Article
-import markdown2
-import os
-from datetime import datetime
-from fastapi import Form, HTTPException
-from newspaper import Article
-import html2text
-import os
-from dotenv import load_dotenv
+from starlette.concurrency import run_in_threadpool
+
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
+from fastapi_cache.decorator import cache
 
 load_dotenv()  # This will load variables from a .env file into the environment
 
