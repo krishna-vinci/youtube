@@ -53,11 +53,10 @@
                       d="M8 2H16C17.1046 2 18 2.8954 18 4V6C18 7.1046 17.1046 8 16 8H8C6.8954 8 6 7.1046 6 6V4C6 2.8954 6.8954 2 8 2ZM8 8H16V20C16 21.1046 15.1046 22 14 22H10C8.8954 22 8 21.1046 8 20V8Z" />
               </svg>
             </button>
-            <!-- Add to Project (disabled) -->
-            <button class="btn btn-sm btn-square" disabled title="Add to Project">
+            <!-- Save to Project -->
+            <button class="btn btn-sm btn-square" onclick='openSaveToProjectModal({{ item.title|tojson }}, {{ item.link|tojson }}, {{ item.published|tojson }}, {{ item.description|tojson }})' title="Save to Project">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 4v16m8-8H4" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
             </button>
             <!-- Read More (Modal Trigger) -->
@@ -117,21 +116,18 @@
                     d="M8 2H16C17.1046 2 18 2.8954 18 4V6C18 7.1046 17.1046 8 16 8H8C6.8954 8 6 7.1046 6 6V4C6 2.8954 6.8954 2 8 2ZM8 8H16V20C16 21.1046 15.1046 22 14 22H10C8.8954 22 8 21.1046 8 20V8Z" />
             </svg>
           </button>
-          <!-- Add to Project (disabled) -->
-          <button class="btn btn-sm btn-square" disabled title="Add to Project">
+          <!-- Save to Project -->
+          <button class="btn btn-xs btn-square" onclick='openSaveToProjectModal({{ item.title|tojson }}, {{ item.link|tojson }}, {{ item.published|tojson }}, {{ item.description|tojson }})' title="Save to Project">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 4v16m8-8H4" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
             </svg>
           </button>
-          <!-- Read More (Modal Trigger) -->
-          <label for="modal-headline-{{ cat.category|replace(' ', '-') }}-{{ loop.index }}" class="btn btn-sm btn-square modal-button" title="Read More"
+          <!-- Read More -->
+          <label for="modal-headline-{{ cat.category|replace(' ', '-') }}-{{ loop.index }}" class="btn btn-xs btn-square modal-button" title="Read More"
                  onclick="loadFullArticle('{{ item.link }}', 'headline-{{ cat.category|replace(' ', '-') }}-{{ loop.index }}')">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
           </label>
         </div>
@@ -187,20 +183,17 @@
                         d="M8 2H16C17.1046 2 18 2.8954 18 4V6C18 7.1046 17.1046 8 16 8H8C6.8954 8 6 7.1046 6 6V4C6 2.8954 6.8954 2 8 2ZM8 8H16V20C16 21.1046 15.1046 22 14 22H10C8.8954 22 8 21.1046 8 20V8Z" />
                 </svg>
               </button>
-              <!-- Add to Project (disabled) -->
-              <button class="btn btn-xs btn-square" disabled title="Add to Project" onclick="event.stopPropagation();">
+              <!-- Save to Project -->
+              <button class="btn btn-xs btn-square" onclick='openSaveToProjectModal({{ item.title|tojson }}, {{ item.link|tojson }}, {{ item.published|tojson }}, {{ item.description|tojson }})' title="Save to Project">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M12 4v16m8-8H4" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
               </button>
               <!-- Read More -->
               <button class="btn btn-xs btn-square" onclick="event.stopPropagation(); loadArticleHtml('{{ item.link }}', this)" title="Read More">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                 </svg>
               </button>
             </div>
@@ -218,6 +211,38 @@
     </div>
   </div>
 </div>
+
+<!-- Save to Project Modal -->
+<input type="checkbox" id="saveToProjectModal" class="modal-toggle" />
+<label for="saveToProjectModal" class="modal cursor-pointer">
+  <label class="modal-box relative" for="">
+    <h3 class="font-bold text-lg mb-4">Save Article to Project</h3>
+    <form id="saveToProjectForm" onsubmit="submitSaveToProject(event)">
+      <!-- Hidden fields for article data -->
+      <input type="hidden" id="articleTitle" name="title">
+      <input type="hidden" id="articleLink" name="link">
+      <input type="hidden" id="articlePublished" name="published">
+      <input type="hidden" id="articleDescription" name="description">
+      <!-- Category Dropdown with onchange to fetch project names -->
+      <label for="saveCategory" class="label">Category</label>
+      <select id="saveCategory" name="category" class="select select-bordered mb-4" required onchange="fetchProjectNames()">
+        {% for cat in predefined_categories %}
+          <option value="{{ cat }}">{{ cat }}</option>
+        {% endfor %}
+      </select>
+      <!-- Project Name Input with datalist for autocomplete -->
+      <label for="saveProject" class="label">Project Name</label>
+      <input type="text" id="saveProject" name="project" class="input input-bordered mb-4" placeholder="Enter project name" list="projectSuggestions" required>
+      <datalist id="projectSuggestions">
+        <!-- Options will be added dynamically -->
+      </datalist>
+      <div class="modal-action">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <label for="saveToProjectModal" class="btn">Cancel</label>
+      </div>
+    </form>
+  </label>
+</label>
 
 <!-- SCRIPTS -->
 <script>
@@ -345,6 +370,55 @@
       }
     }
   });
+
+  // Save to Project Functions
+  function openSaveToProjectModal(title, link, published, description) {
+    console.log("openSaveToProjectModal called with:", title, link, published, description);
+    document.getElementById("articleTitle").value = title;
+    document.getElementById("articleLink").value = link;
+    document.getElementById("articlePublished").value = published;
+    document.getElementById("articleDescription").value = description;
+    document.getElementById("saveToProjectModal").checked = true;
+    fetchProjectNames(); // fetch suggestions when modal opens
+  }
+
+  async function submitSaveToProject(event) {
+    event.preventDefault();
+    const formData = new FormData(document.getElementById("saveToProjectForm"));
+    try {
+      const response = await fetch("/api/add_to_project", {
+        method: "POST",
+        body: formData
+      });
+      const result = await response.json();
+      if(result.status === "success") {
+        alert("Article saved to project!");
+        document.getElementById("saveToProjectModal").checked = false;
+      } else {
+        alert("Error: " + result.error);
+      }
+    } catch (error) {
+      alert("Error saving article: " + error);
+    }
+  }
+
+  // Fetch project names for selected category and update the datalist for project autocomplete
+  async function fetchProjectNames() {
+    const category = document.getElementById("saveCategory").value;
+    try {
+      const response = await fetch(`/api/project_names?category=${encodeURIComponent(category)}`);
+      const data = await response.json();
+      const datalist = document.getElementById("projectSuggestions");
+      datalist.innerHTML = ""; // Clear previous suggestions
+      data.projects.forEach(proj => {
+        const option = document.createElement("option");
+        option.value = proj;
+        datalist.appendChild(option);
+      });
+    } catch (error) {
+      console.error("Error fetching project names:", error);
+    }
+  }
 </script>
 
 <!-- Minimal CSS animation for toast and paragraph spacing in .prose -->
@@ -358,7 +432,6 @@
   .animate-fadeInOut {
     animation: fadeInOut 2s ease-in-out forwards;
   }
-  /* Ensure paragraphs in the detail pane have spacing */
   .prose p {
     margin: 0.5em 0;
   }
