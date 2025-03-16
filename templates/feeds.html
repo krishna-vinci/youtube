@@ -5,13 +5,22 @@
 <div class="flex items-center justify-between mb-4">
   <div class="flex items-center space-x-2">
     <h1 class="text-3xl font-bold">News Feeds</h1>
-    <!-- Category Selection Dropdown (next to title) -->
+    <!-- Category Dropdown -->
     <select id="category-select" class="select select-bordered select-sm" onchange="filterByCategory()">
       <option value="All">All Categories</option>
       {% for cat in categories %}
         <option value="{{ cat.category }}">{{ cat.category }}</option>
       {% endfor %}
     </select>
+    <!-- Report Controls (Timeframe and Generate Report) -->
+    <div class="flex items-center space-x-2 ml-4">
+      <select id="timeframe-select" class="select select-bordered select-sm">
+        <option value="last24">Last 24 Hours</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="week">Last Week</option>
+      </select>
+      <button id="generate-report" class="btn btn-primary btn-sm" onclick="generateReport()">Generate Report</button>
+    </div>
   </div>
   <div class="flex items-center space-x-2">
     <button id="btn-card" class="btn btn-outline btn-sm" onclick="showCardView()">CARD VIEW</button>
@@ -19,6 +28,9 @@
     <button id="btn-column" class="btn btn-outline btn-sm" onclick="showColumnView()">COLUMN VIEW</button>
   </div>
 </div>
+
+<!-- Notification for Report Generation -->
+<div id="report-status" class="mb-4"></div>
 
 <!-- Toast Container for ephemeral "copied" messages -->
 <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
@@ -246,6 +258,29 @@
 
 <!-- SCRIPTS -->
 <script>
+  // Report Generation Function
+  function generateReport() {
+    const timeframe = document.getElementById("timeframe-select").value;
+    fetch(`/daily-report-md?timeframe=${encodeURIComponent(timeframe)}`)
+      .then(response => response.json())
+      .then(data => {
+        if(data.status === "success") {
+          // Show a temporary notification at the top
+          const reportStatus = document.getElementById("report-status");
+          reportStatus.innerHTML = `<div class="alert alert-success">Report generated: ${data.file}</div>`;
+          setTimeout(() => { reportStatus.innerHTML = ""; }, 3000);
+        } else {
+          document.getElementById("report-status").innerHTML = `<div class="alert alert-error">${data.error || 'Error generating report.'}</div>`;
+          setTimeout(() => { document.getElementById("report-status").innerHTML = ""; }, 3000);
+        }
+      })
+      .catch(err => {
+        console.error('Error generating report:', err);
+        document.getElementById("report-status").innerHTML = `<div class="alert alert-error">Error generating report.</div>`;
+        setTimeout(() => { document.getElementById("report-status").innerHTML = ""; }, 3000);
+      });
+  }
+
   // Show/Hide Views
   function showCardView() {
     document.getElementById('card-view').classList.remove('hidden');
