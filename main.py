@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser
 import pytz
@@ -9,6 +10,7 @@ import requests
 import markdown2
 import html2text
 from newspaper import Article, fulltext
+from bs4 import BeautifulSoup  # For improved HTML pre-processing
 
 from dotenv import load_dotenv
 
@@ -84,7 +86,7 @@ FEED_CATEGORIES = {
 PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
 PROJECTS_ROOT = "/Users/krishna/Desktop/YouTube/YouTube"
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
-DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", '/Users/krishna/Desktop/youtube/youtube/daily report')
+DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", '/Volumes/nfsdata/youtube/daily report')
 
 # Indian Standard Time
 IST = pytz.timezone("Asia/Kolkata")
@@ -123,6 +125,43 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+
+# --- HTML to Markdown Conversion Helper ---
+def convert_html_to_markdown(html_content: str) -> str:
+    """
+    Convert HTML content to Markdown.
+
+    Pre-process the HTML to insert additional newline spacing for paragraphs
+    and replace <br> tags with newlines. Then use html2text to convert the cleaned HTML
+    to Markdown text. Finally, post-process the Markdown to collapse excessive newlines.
+    """
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # Insert newlines before and after <p> tags for proper paragraph spacing
+        for p in soup.find_all('p'):
+            p.insert_before("\n\n")
+            p.append("\n\n")
+        # Replace <br> tags with newline characters
+        for br in soup.find_all('br'):
+            br.replace_with("\n")
+        cleaned_html = str(soup)
+        
+        converter = html2text.HTML2Text()
+        converter.ignore_images = False
+        converter.ignore_links = False
+        converter.bypass_tables = False
+        converter.body_width = 0  # Disable wrapping so newlines are preserved
+        
+        markdown_text = converter.handle(cleaned_html)
+        # Remove trailing spaces on each line for cleaner output
+        markdown_text = "\n".join(line.rstrip() for line in markdown_text.splitlines())
+        # Collapse multiple newlines (3 or more) into exactly 2 newlines for paragraph separation
+        markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
+        return markdown_text.strip()
+    except Exception as e:
+        logging.exception("Error converting HTML to Markdown: %s", e)
+        # Fallback to the original HTML if conversion fails
+        return html_content
 
 # --- Scheduled Database Updates for Feeds ---
 def format_datetime(dt_string):
@@ -177,19 +216,13 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             if cur.fetchone() is not None:
                 continue
 
-            # Extract full article content using Newspaper3k.
+            # Extract full article content using Newspaper3k and convert HTML to Markdown
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
                 art.parse()
-                # Convert HTML to Markdown using html2text for consistency.
                 if art.article_html:
-                    converter = html2text.HTML2Text()
-                    converter.ignore_images = False
-                    converter.ignore_links = False
-                    converter.bypass_tables = False
-                    converter.body_width = 0
-                    article_md = converter.handle(art.article_html)
+                    article_md = convert_html_to_markdown(art.article_html)
                 else:
                     article_md = art.text.strip()
             except Exception as e:
@@ -296,12 +329,7 @@ async def daily_report_md(timeframe: str = Query("last24", description="Options:
                 # Convert content from HTML to Markdown if needed
                 if content and "<" in content:
                     try:
-                        converter = html2text.HTML2Text()
-                        converter.ignore_images = False
-                        converter.ignore_links = False
-                        converter.bypass_tables = False
-                        converter.body_width = 0
-                        converted_content = converter.handle(content)
+                        converted_content = convert_html_to_markdown(content)
                     except Exception as e:
                         converted_content = f"(Error converting content: {str(e)})"
                 else:
@@ -385,6 +413,8 @@ async def feeds(request: Request):
         "predefined_categories": PREDEFINED_CATEGORIES
     })
 
+import markdown2
+
 @app.get("/article-full-text")
 async def article_full_text(url: str):
     try:
@@ -395,8 +425,11 @@ async def article_full_text(url: str):
         cur.close()
         conn.close()
         if row and row[0]:
-            return JSONResponse({"content": row[0]})
+            # row[0] is the stored Markdown
+            rendered_html = markdown2.markdown(row[0])
+            return JSONResponse({"content": rendered_html})
         else:
+            # fallback to raw HTML from Newspaper3k if not in DB
             a = Article(url, keep_article_html=True)
             a.download()
             a.parse()
@@ -406,6 +439,7 @@ async def article_full_text(url: str):
             return JSONResponse({"content": content_html})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @app.get("/article-full-html")
 async def article_full_html(url: str):
@@ -545,8 +579,6 @@ async def upload_file(category: str, project: str, file: UploadFile = File(...))
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     return {"status": "success", "filename": file.filename}
 
-import html2text
-
 @app.post("/api/add_to_project")
 async def add_article_to_project(
     category: str = Form(...),
@@ -578,21 +610,10 @@ async def add_article_to_project(
         error_str = f"(Error extracting article HTML: {str(e)})"
 
     if content_html:
-        converter = html2text.HTML2Text()
-        converter.ignore_images = False
-        converter.ignore_links = False
-        converter.bypass_tables = False
-        converter.body_width = 0
-        try:
-            full_markdown = converter.handle(content_html)
-        except Exception as e:
-            full_markdown = f"(Error converting HTML to Markdown: {str(e)})"
+        full_markdown = convert_html_to_markdown(content_html)
     else:
         fallback_text = art.text.strip() if 'art' in locals() and art.text else ""
-        if fallback_text:
-            full_markdown = fallback_text
-        else:
-            full_markdown = error_str if 'error_str' in locals() else "(No article content found)"
+        full_markdown = fallback_text if fallback_text else error_str if 'error_str' in locals() else "(No article content found)"
 
     snippet = (
         f"\n## Article: {title}\n\n"
