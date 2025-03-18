@@ -105,8 +105,8 @@ cp .env.example .env
 
 Edit the `.env` file to update the following:
 
-- **Database Settings:** `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`, `DB_PORT`, `POSTGRES_HOST_PORT`
-- **FastAPI Settings:** `FASTAPI_HOST_PORT`
+- **Database Settings:** `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`, `DB_PORT`, `POSTGRES_HOST_PORT` (all can be default and no need to edit)
+- **FastAPI Settings:** `FASTAPI_HOST_PORT` (can be default)
 - **Other Services:** `PIXABAY_API_KEY`, `RSSBRIDGE_HOST`, `METUBE_URL`, `NITTER_URL`
 - **Paths:** `HOST_YOUTUBE_DATA`, `PROJECTS_ROOT`, `DAILY_REPORT_DIR`
 
