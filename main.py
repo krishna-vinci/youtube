@@ -9,8 +9,8 @@ import feedparser
 import requests
 import markdown2
 import html2text
-from newspaper import Article, fulltext
-from bs4 import BeautifulSoup  # For improved HTML pre-processing
+from newspaper import Article
+from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 
@@ -26,38 +26,39 @@ from fastapi_cache.decorator import cache
 import psycopg2
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from config import Config  # Import our centralized config
+
 load_dotenv()  # Load environment variables
 
 # --- Global Configuration & Feed Variables ---
-PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
-if not PIXABAY_API_KEY:
+if not Config.PIXABAY_API_KEY:
     raise Exception("PIXABAY_API_KEY is not set in the environment.")
 
 RSS_FEED_URLS = {
     "reddit": [
         {
             "name": "r/Indiaspeaks",
-            "url": "http://192.168.0.122:3333/?action=display&bridge=RedditBridge&context=single&r=IndiaSpeaks&f=&score=50&d=hot&search=&frontend=https%3A%2F%2Fold.reddit.com&format=Atom"
+            "url": f"http://{Config.RSSBRIDGE_HOST}/?action=display&bridge=RedditBridge&context=single&r=IndiaSpeaks&f=&score=50&d=hot&search=&frontend=https%3A%2F%2Fold.reddit.com&format=Atom"
         },
         {
             "name": "worldnews",
-            "url": "http://192.168.0.122:3333/?action=display&bridge=RedditBridge&context=single&r=selfhosted&f=&score=&d=top&search=&frontend=https%3A%2F%2Fold.reddit.com&format=Atom"
+            "url": f"http://{Config.RSSBRIDGE_HOST}/?action=display&bridge=RedditBridge&context=single&r=selfhosted&f=&score=&d=top&search=&frontend=https%3A%2F%2Fold.reddit.com&format=Atom"
         },
     ],
     "youtube": [
         {
             "name": "Prof K Nageshwar",
-            "url": "http://192.168.0.122:3333/?action=display&bridge=YoutubeBridge&context=By+channel+id&c=UCm40kSg56qfys19NtzgXAAg&duration_min=2&duration_max=&format=Atom"
+            "url": f"http://{Config.RSSBRIDGE_HOST}/?action=display&bridge=YoutubeBridge&context=By+channel+id&c=UCm40kSg56qfys19NtzgXAAg&duration_min=2&duration_max=&format=Atom"
         },
         {
             "name": "Prasadtech",
-            "url": "http://192.168.0.122:3333/?action=display&bridge=YoutubeBridge&context=By+channel+id&c=UCb-xXZ7ltTvrh9C6DgB9H-Q&duration_min=2&duration_max=&format=Atom"
+            "url": f"http://{Config.RSSBRIDGE_HOST}/?action=display&bridge=YoutubeBridge&context=By+channel+id&c=UCb-xXZ7ltTvrh9C6DgB9H-Q&duration_min=2&duration_max=&format=Atom"
         },
     ],
     "twitter": [
         {
             "name": "Twitter Feed",
-            "url": "https://nitter.space"
+            "url": Config.NITTER_URL
         }
     ]
 }
@@ -84,9 +85,9 @@ FEED_CATEGORIES = {
 }
 
 PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
-PROJECTS_ROOT = "/Users/krishna/Desktop/YouTube/YouTube"
+PROJECTS_ROOT = Config.PROJECTS_ROOT
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
-DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", '/Volumes/nfsdata/youtube/daily report')
+DAILY_REPORT_DIR = Config.DAILY_REPORT_DIR
 
 # Indian Standard Time
 IST = pytz.timezone("Asia/Kolkata")
@@ -97,18 +98,12 @@ templates = Jinja2Templates(directory="templates")
 
 # --- Database Setup ---
 def get_db_connection():
-    return psycopg2.connect(
-        dbname="trading_app",
-        user="krishna",
-        password="1122",
-        host="192.168.0.114",
-        port="5432"
-    )
+    conn_str = f"dbname={Config.DB_NAME} user={Config.DB_USER} password={Config.DB_PASSWORD} host={Config.DB_HOST} port={Config.DB_PORT}"
+    return psycopg2.connect(conn_str)
 
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # New schema with a content column.
     cur.execute("""
     CREATE TABLE IF NOT EXISTS "YouTube-articles" (
         id SERIAL PRIMARY KEY,
@@ -128,20 +123,11 @@ def init_db():
 
 # --- HTML to Markdown Conversion Helper ---
 def convert_html_to_markdown(html_content: str) -> str:
-    """
-    Convert HTML content to Markdown.
-
-    Pre-process the HTML to insert additional newline spacing for paragraphs
-    and replace <br> tags with newlines. Then use html2text to convert the cleaned HTML
-    to Markdown text. Finally, post-process the Markdown to collapse excessive newlines.
-    """
     try:
         soup = BeautifulSoup(html_content, 'html.parser')
-        # Insert newlines before and after <p> tags for proper paragraph spacing
         for p in soup.find_all('p'):
             p.insert_before("\n\n")
             p.append("\n\n")
-        # Replace <br> tags with newline characters
         for br in soup.find_all('br'):
             br.replace_with("\n")
         cleaned_html = str(soup)
@@ -150,17 +136,14 @@ def convert_html_to_markdown(html_content: str) -> str:
         converter.ignore_images = False
         converter.ignore_links = False
         converter.bypass_tables = False
-        converter.body_width = 0  # Disable wrapping so newlines are preserved
+        converter.body_width = 0
         
         markdown_text = converter.handle(cleaned_html)
-        # Remove trailing spaces on each line for cleaner output
         markdown_text = "\n".join(line.rstrip() for line in markdown_text.splitlines())
-        # Collapse multiple newlines (3 or more) into exactly 2 newlines for paragraph separation
         markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
         return markdown_text.strip()
     except Exception as e:
         logging.exception("Error converting HTML to Markdown: %s", e)
-        # Fallback to the original HTML if conversion fails
         return html_content
 
 # --- Scheduled Database Updates for Feeds ---
@@ -211,12 +194,10 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 pub_dt = None
             published_formatted = format_datetime(raw_published) if raw_published else "No date"
             
-            # Check by title to skip duplicates (adjust if needed)
             cur.execute('SELECT id FROM "YouTube-articles" WHERE title = %s', (title,))
             if cur.fetchone() is not None:
                 continue
 
-            # Extract full article content using Newspaper3k and convert HTML to Markdown
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
@@ -238,7 +219,6 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
         conn.close()
     except Exception as e:
         logging.exception("Error parsing/storing feed for URL %s: %s", rss_url, e)
-
 
 def fetch_all_feeds_db():
     for category, feeds in FEED_CATEGORIES.items():
@@ -291,18 +271,15 @@ async def daily_report_md(timeframe: str = Query("last24", description="Options:
     else:
         return JSONResponse({"error": "Invalid timeframe option."}, status_code=400)
     
-    # File name: daily_report_{label}_{YYYYMMDD}.md
     file_date = now.strftime('%Y%m%d')
     filename = f"daily_report_{report_label}_{file_date}.md"
     os.makedirs(DAILY_REPORT_DIR, exist_ok=True)
     file_path = os.path.join(DAILY_REPORT_DIR, filename)
     
-    # Create the file with header if it doesn't exist
     if not os.path.exists(file_path):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(f"# Daily Report ({report_label.capitalize()})\nGenerated on: {now.strftime('%b %d, %Y %I:%M %p')}\n\n")
     
-    # Read current file content to avoid duplicates
     with open(file_path, "r", encoding="utf-8") as f:
         existing_content = f.read()
     
@@ -323,10 +300,8 @@ async def daily_report_md(timeframe: str = Query("last24", description="Options:
                 existing_content += category_header
             for row in rows:
                 title, link, published, content, description = row
-                # Skip if this link is already in the file
                 if link in existing_content:
                     continue
-                # Convert content from HTML to Markdown if needed
                 if content and "<" in content:
                     try:
                         converted_content = convert_html_to_markdown(content)
@@ -359,9 +334,7 @@ scheduler = BackgroundScheduler()
 async def startup_event():
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     init_db()
-    # Immediately populate the database.
     fetch_all_feeds_db()
-    # Schedule feed updates every 5 minutes.
     scheduler.add_job(fetch_all_feeds_db, 'interval', minutes=5)
     scheduler.start()
 
@@ -413,8 +386,6 @@ async def feeds(request: Request):
         "predefined_categories": PREDEFINED_CATEGORIES
     })
 
-import markdown2
-
 @app.get("/article-full-text")
 async def article_full_text(url: str):
     try:
@@ -425,11 +396,9 @@ async def article_full_text(url: str):
         cur.close()
         conn.close()
         if row and row[0]:
-            # row[0] is the stored Markdown
             rendered_html = markdown2.markdown(row[0])
             return JSONResponse({"content": rendered_html})
         else:
-            # fallback to raw HTML from Newspaper3k if not in DB
             a = Article(url, keep_article_html=True)
             a.download()
             a.parse()
@@ -439,7 +408,6 @@ async def article_full_text(url: str):
             return JSONResponse({"content": content_html})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 @app.get("/article-full-html")
 async def article_full_html(url: str):
@@ -478,7 +446,7 @@ async def trends(request: Request, source: str = "reddit"):
             channels.append({"name": feed["name"], "feed_items": items})
     context = {"request": request, "source": source, "channels": channels}
     if source == "twitter":
-        context["nitter_url"] = "https://nitter.net/"
+        context["nitter_url"] = Config.NITTER_URL
     return templates.TemplateResponse("trends.html", context)
 
 # --- Projects Endpoints ---
@@ -552,7 +520,7 @@ async def view_project_detail(request: Request, category: str, project: str):
         "category": category,
         "project": project,
         "files_in_project": files_in_project,
-        "metube_url": "http://192.168.0.114:8081"
+        "metube_url": Config.METUBE_URL
     })
 
 @app.get("/projects/{category}/{project}/content", response_class=HTMLResponse)
@@ -639,7 +607,7 @@ async def get_pixabay_results(q: str, media_type: str, page: int):
     if media_type == "image":
         url = "https://pixabay.com/api/"
         params = {
-            "key": PIXABAY_API_KEY,
+            "key": Config.PIXABAY_API_KEY,
             "q": q,
             "image_type": "photo",
             "per_page": 12,
@@ -649,7 +617,7 @@ async def get_pixabay_results(q: str, media_type: str, page: int):
     else:
         url = "https://pixabay.com/api/videos/"
         params = {
-            "key": PIXABAY_API_KEY,
+            "key": Config.PIXABAY_API_KEY,
             "q": q,
             "per_page": 12,
             "page": page,
