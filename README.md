@@ -5,6 +5,16 @@
 This application aggregates content from various sources, processes articles, and provides an interactive interface for managing projects and media. It combines a powerful FastAPI backend with a modern, dynamic frontend built using HTMX, Tailwind CSS, and Alpine.js.
 
 ### Features
+![CleanShot 2025-03-18 at 23 43 32@2x](https://github.com/user-attachments/assets/4c82c6be-3613-4ba4-84b8-0cb7a08c5d74)
+
+![CleanShot 2025-03-18 at 23 45 28@2x](https://github.com/user-attachments/assets/85df9fd8-1caf-4920-ba31-efbf063f3ed6)
+![CleanShot 2025-03-18 at 23 58 50@2x](https://github.com/user-attachments/assets/91804197-d595-453d-8a85-8dfcfba099e3)
+![CleanShot 2025-03-19 at 00 02 48@2x](https://github.com/user-attachments/assets/d6d69b19-bc06-4814-9e43-9238041f4521)
+
+![CleanShot 2025-03-19 at 00 03 31@2x](https://github.com/user-attachments/assets/7144fe16-e437-47da-a9f2-480c5027033b)
+
+![CleanShot 2025-03-19 at 00 08 38@2x](https://github.com/user-attachments/assets/4e547f0f-bce2-40f6-823e-ef8bedb10edc)
+
 
 #### Content Aggregation & Feeds
 
@@ -30,6 +40,7 @@ This application aggregates content from various sources, processes articles, an
 
 - Organize content by creating projects.
 - Save articles with rich Markdown formatting directly to a project.
+- (articles get uppended to md file in the project you add article)
 - Upload additional files and integrate with Metube for video management.
 
 #### Image/Video Integration
