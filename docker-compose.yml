@@ -1,17 +1,19 @@
-version: '2.2'  # or 2.1
 
 services:
   db:
     image: postgres:15
     container_name: my-postgres
     environment:
-      POSTGRES_USER: krishna
-      POSTGRES_PASSWORD: "1122"
-      POSTGRES_DB: trading_app
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: ${DB_NAME}
     ports:
-      - "5435:5432"
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U krishna -d trading_app || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME} || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -20,9 +22,24 @@ services:
     build: .
     container_name: youtube-app
     ports:
-      - "8666:8666"
+      - "${FASTAPI_HOST_PORT}:8666"
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql://krishna:1122@db:5432/trading_app
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY}
+      - RSSBRIDGE_HOST=${RSSBRIDGE_HOST}
+      - METUBE_URL=${METUBE_URL}
+      - NITTER_URL=${NITTER_URL}
+      - PROJECTS_ROOT=${PROJECTS_ROOT}
+      - DAILY_REPORT_DIR=${DAILY_REPORT_DIR}
+    volumes:
+      - ${HOST_YOUTUBE_DATA}:/mnt/editing/youtube-data
+      - .:/app
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
