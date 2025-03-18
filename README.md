@@ -113,7 +113,8 @@ Edit the `.env` file to update the following:
 #### Build and Run Containers
 
 ```bash
-docker-compose up --build
+docker compose up --build
+
 ```
 
 With the `restart: unless-stopped` policy in place, Docker will automatically restart your containers if they stop unexpectedly.
