@@ -175,6 +175,6 @@ For beginners, here’s how you can add or update feeds:
 
 - Use this documentation as a starting point and update it as your application evolves.
 
-**Note:** As this is a development preview, everything isn't straightforward, and you should know exactly what you're doing. The intention is to add more features with suggestions and contributions.
+
 
 
