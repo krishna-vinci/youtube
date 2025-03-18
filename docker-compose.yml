@@ -1,0 +1,28 @@
+version: '2.2'  # or 2.1
+
+services:
+  db:
+    image: postgres:15
+    container_name: my-postgres
+    environment:
+      POSTGRES_USER: krishna
+      POSTGRES_PASSWORD: "1122"
+      POSTGRES_DB: trading_app
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U krishna -d trading_app || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  fastapi:
+    build: .
+    container_name: youtube-app
+    ports:
+      - "8666:8666"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://krishna:1122@db:5432/trading_app

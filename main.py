@@ -1,60 +1,38 @@
-import feedparser
+import os
+import logging
+import re
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser
-import os
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-import feedparser
-import requests
-from datetime import datetime, timedelta
-from dateutil import parser as date_parser
-from newspaper import Article  # from newspaper3k
-from newspaper import fulltext
-from newspaper import Article
-
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi import Form
-from fastapi.responses import RedirectResponse
-import os
-from fastapi import Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
-from datetime import datetime
-import markdown2
-import os
-from datetime import datetime
-
-import markdown2
-from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
-
-
-import os
-from datetime import datetime, timedelta
+import pytz
 
 import feedparser
 import requests
-from dateutil import parser as date_parser
-from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile
+import markdown2
+import html2text
+from newspaper import Article, fulltext
+from bs4 import BeautifulSoup  # For improved HTML pre-processing
+
+from dotenv import load_dotenv
+
+from fastapi import FastAPI, Request, Form, HTTPException, File, UploadFile, Query
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from newspaper import Article
-import markdown2
-import os
-from datetime import datetime
-from fastapi import Form, HTTPException
-from newspaper import Article
-import html2text
+from starlette.concurrency import run_in_threadpool
 
-app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
+from fastapi_cache.decorator import cache
 
-DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
+import psycopg2
+from apscheduler.schedulers.background import BackgroundScheduler
 
-# RSS Feed URLs & Feed Categories
+load_dotenv()  # Load environment variables
+
+# --- Global Configuration & Feed Variables ---
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
+if not PIXABAY_API_KEY:
+    raise Exception("PIXABAY_API_KEY is not set in the environment.")
+
 RSS_FEED_URLS = {
     "reddit": [
         {
@@ -105,11 +83,92 @@ FEED_CATEGORIES = {
     ]
 }
 
+PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
+PROJECTS_ROOT = "/Users/krishna/Desktop/YouTube/YouTube"
+DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
+DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", '/Volumes/nfsdata/youtube/daily report')
 
+# Indian Standard Time
+IST = pytz.timezone("Asia/Kolkata")
+
+# --- FastAPI App & Templates ---
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+# --- Database Setup ---
+def get_db_connection():
+    return psycopg2.connect(
+        dbname="trading_app",
+        user="krishna",
+        password="1122",
+        host="192.168.0.114",
+        port="5432"
+    )
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # New schema with a content column.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS "YouTube-articles" (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        link TEXT UNIQUE NOT NULL,
+        description TEXT,
+        thumbnail TEXT,
+        published TEXT,
+        published_datetime TIMESTAMP,
+        category TEXT,
+        content TEXT
+    );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# --- HTML to Markdown Conversion Helper ---
+def convert_html_to_markdown(html_content: str) -> str:
+    """
+    Convert HTML content to Markdown.
+
+    Pre-process the HTML to insert additional newline spacing for paragraphs
+    and replace <br> tags with newlines. Then use html2text to convert the cleaned HTML
+    to Markdown text. Finally, post-process the Markdown to collapse excessive newlines.
+    """
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+        # Insert newlines before and after <p> tags for proper paragraph spacing
+        for p in soup.find_all('p'):
+            p.insert_before("\n\n")
+            p.append("\n\n")
+        # Replace <br> tags with newline characters
+        for br in soup.find_all('br'):
+            br.replace_with("\n")
+        cleaned_html = str(soup)
+        
+        converter = html2text.HTML2Text()
+        converter.ignore_images = False
+        converter.ignore_links = False
+        converter.bypass_tables = False
+        converter.body_width = 0  # Disable wrapping so newlines are preserved
+        
+        markdown_text = converter.handle(cleaned_html)
+        # Remove trailing spaces on each line for cleaner output
+        markdown_text = "\n".join(line.rstrip() for line in markdown_text.splitlines())
+        # Collapse multiple newlines (3 or more) into exactly 2 newlines for paragraph separation
+        markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
+        return markdown_text.strip()
+    except Exception as e:
+        logging.exception("Error converting HTML to Markdown: %s", e)
+        # Fallback to the original HTML if conversion fails
+        return html_content
+
+# --- Scheduled Database Updates for Feeds ---
 def format_datetime(dt_string):
     try:
         dt = date_parser.parse(dt_string)
-        now = datetime.now(dt.tzinfo)
+        dt = dt.astimezone(IST)
+        now = datetime.now(IST)
         yesterday = now - timedelta(days=1)
         if dt.date() == now.date():
             return dt.strftime("Today at %I:%M %p")
@@ -120,7 +179,193 @@ def format_datetime(dt_string):
     except Exception:
         return "No Date"
 
+def parse_and_store_rss_feed(rss_url: str, category: str):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        response = requests.get(rss_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        for entry in feed.entries:
+            title = getattr(entry, "title", "Untitled")
+            link = getattr(entry, "link", "#")
+            description = getattr(entry, "summary", "No description available.")
+            thumbnail_url = None
+            if "media_thumbnail" in entry:
+                thumbnail_url = entry.media_thumbnail[0].get("url")
+            elif "media_content" in entry:
+                thumbnail_url = entry.media_content[0].get("url")
+            if not thumbnail_url and "<img" in description:
+                start = description.find("<img")
+                src_start = description.find('src="', start) + 5
+                src_end = description.find('"', src_start)
+                if src_start > 4 and src_end > src_start:
+                    thumbnail_url = description[src_start:src_end]
+            if not thumbnail_url:
+                thumbnail_url = DEFAULT_THUMBNAIL
+            raw_published = getattr(entry, "published", None)
+            try:
+                pub_dt = date_parser.parse(raw_published) if raw_published else None
+            except Exception:
+                pub_dt = None
+            published_formatted = format_datetime(raw_published) if raw_published else "No date"
+            
+            # Check by title to skip duplicates (adjust if needed)
+            cur.execute('SELECT id FROM "YouTube-articles" WHERE title = %s', (title,))
+            if cur.fetchone() is not None:
+                continue
 
+            # Extract full article content using Newspaper3k and convert HTML to Markdown
+            try:
+                art = Article(link, keep_article_html=True)
+                art.download()
+                art.parse()
+                if art.article_html:
+                    article_md = convert_html_to_markdown(art.article_html)
+                else:
+                    article_md = art.text.strip()
+            except Exception as e:
+                logging.exception("Error extracting content for link %s: %s", link, e)
+                article_md = None
+
+            cur.execute(
+                'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+                (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_md)
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logging.exception("Error parsing/storing feed for URL %s: %s", rss_url, e)
+
+
+def fetch_all_feeds_db():
+    for category, feeds in FEED_CATEGORIES.items():
+        for feed in feeds:
+            parse_and_store_rss_feed(feed["url"], category)
+    logging.info("Feed update (DB) completed at %s", datetime.now())
+
+def get_articles_for_category_db(category: str, days: int = 2):
+    threshold = datetime.now(IST) - timedelta(days=days)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        'SELECT title, link, description, thumbnail, published, published_datetime, category, content FROM "YouTube-articles" WHERE category = %s AND published_datetime >= %s ORDER BY published_datetime DESC',
+        (category, threshold)
+    )
+    rows = cur.fetchall()
+    articles = []
+    for row in rows:
+        articles.append({
+            "title": row[0],
+            "link": row[1],
+            "description": row[2],
+            "thumbnail": row[3],
+            "published": row[4],
+            "published_datetime": row[5],
+            "category": row[6],
+            "content": row[7]
+        })
+    cur.close()
+    conn.close()
+    return articles
+
+# --- Daily Report Endpoint Using Append Logic ---
+@app.get("/daily-report-md", response_class=JSONResponse)
+async def daily_report_md(timeframe: str = Query("last24", description="Options: last24, yesterday, week")):
+    now = datetime.now(IST)
+    if timeframe == "last24":
+        start_time = now - timedelta(hours=24)
+        end_time = now
+        report_label = "24hrs"
+    elif timeframe == "yesterday":
+        yesterday_date = now.date() - timedelta(days=1)
+        start_time = datetime.combine(yesterday_date, datetime.min.time()).astimezone(IST)
+        end_time = datetime.combine(yesterday_date, datetime.max.time()).astimezone(IST)
+        report_label = "yesterday"
+    elif timeframe == "week":
+        start_time = now - timedelta(days=7)
+        end_time = now
+        report_label = "week"
+    else:
+        return JSONResponse({"error": "Invalid timeframe option."}, status_code=400)
+    
+    # File name: daily_report_{label}_{YYYYMMDD}.md
+    file_date = now.strftime('%Y%m%d')
+    filename = f"daily_report_{report_label}_{file_date}.md"
+    os.makedirs(DAILY_REPORT_DIR, exist_ok=True)
+    file_path = os.path.join(DAILY_REPORT_DIR, filename)
+    
+    # Create the file with header if it doesn't exist
+    if not os.path.exists(file_path):
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"# Daily Report ({report_label.capitalize()})\nGenerated on: {now.strftime('%b %d, %Y %I:%M %p')}\n\n")
+    
+    # Read current file content to avoid duplicates
+    with open(file_path, "r", encoding="utf-8") as f:
+        existing_content = f.read()
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    report_appended = False
+    for category in FEED_CATEGORIES.keys():
+        cur.execute(
+            'SELECT title, link, published, content, description FROM "YouTube-articles" WHERE category = %s AND published_datetime >= %s AND published_datetime <= %s ORDER BY published_datetime DESC',
+            (category, start_time, end_time)
+        )
+        rows = cur.fetchall()
+        if rows:
+            category_header = f"\n## {category}\n"
+            if category_header not in existing_content:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(category_header)
+                existing_content += category_header
+            for row in rows:
+                title, link, published, content, description = row
+                # Skip if this link is already in the file
+                if link in existing_content:
+                    continue
+                # Convert content from HTML to Markdown if needed
+                if content and "<" in content:
+                    try:
+                        converted_content = convert_html_to_markdown(content)
+                    except Exception as e:
+                        converted_content = f"(Error converting content: {str(e)})"
+                else:
+                    converted_content = content if content else "(No content)"
+                snippet = (
+                    f"\n## Article: {title}\n\n"
+                    f"**Link:** [{link}]({link})\n"
+                    f"**Published:** {published}\n"
+                    f"**Description:** {description}\n\n"
+                    f"### Content\n\n"
+                    f"{converted_content}\n\n"
+                    f"---\n"
+                )
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(snippet)
+                existing_content += snippet
+                report_appended = True
+    cur.close()
+    conn.close()
+    
+    message = "Report updated" if report_appended else "No new articles to append"
+    return JSONResponse({"status": "success", "message": message, "file": filename})
+
+# --- App Startup & Scheduler ---
+scheduler = BackgroundScheduler()
+@app.on_event("startup")
+async def startup_event():
+    FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
+    init_db()
+    # Immediately populate the database.
+    fetch_all_feeds_db()
+    # Schedule feed updates every 5 minutes.
+    scheduler.add_job(fetch_all_feeds_db, 'interval', minutes=5)
+    scheduler.start()
+
+# --- Existing Feed Parsing for Trends (On-the-fly) ---
 def parse_rss_feed(rss_url: str):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     response = requests.get(rss_url, headers=headers, timeout=10)
@@ -155,35 +400,46 @@ def parse_rss_feed(rss_url: str):
         })
     return items
 
-# ------------------ Feeds Endpoints ------------------
+# --- Feeds Endpoints ---
 @app.get("/feeds", response_class=HTMLResponse)
 async def feeds(request: Request):
-    categories = []
-    for category_name, feeds in FEED_CATEGORIES.items():
-        all_feed_items = []
-        for feed in feeds:
-            items = parse_rss_feed(feed["url"])
-            all_feed_items.extend(items)
-        categories.append({"category": category_name, "feed_items": all_feed_items})
-    # Pass predefined_categories for use in the modal
+    categories_list = []
+    for category in FEED_CATEGORIES.keys():
+        articles = get_articles_for_category_db(category, days=2)
+        categories_list.append({"category": category, "feed_items": articles})
     return templates.TemplateResponse("feeds.html", {
         "request": request,
-        "categories": categories,
+        "categories": categories_list,
         "predefined_categories": PREDEFINED_CATEGORIES
     })
+
+import markdown2
 
 @app.get("/article-full-text")
 async def article_full_text(url: str):
     try:
-        a = Article(url, keep_article_html=True)
-        a.download()
-        a.parse()
-        content_html = a.article_html.strip() if a.article_html else ""
-        if not content_html:
-            content_html = "<p>" + a.text.replace("\n", "</p><p>") + "</p>"
-        return JSONResponse({"content": content_html})
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT content FROM "YouTube-articles" WHERE link = %s', (url,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if row and row[0]:
+            # row[0] is the stored Markdown
+            rendered_html = markdown2.markdown(row[0])
+            return JSONResponse({"content": rendered_html})
+        else:
+            # fallback to raw HTML from Newspaper3k if not in DB
+            a = Article(url, keep_article_html=True)
+            a.download()
+            a.parse()
+            content_html = a.article_html.strip() if a.article_html else ""
+            if not content_html:
+                content_html = "<p>" + a.text.replace("\n", "</p><p>") + "</p>"
+            return JSONResponse({"content": content_html})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @app.get("/article-full-html")
 async def article_full_html(url: str):
@@ -200,14 +456,11 @@ async def article_full_html(url: str):
 
 @app.get("/feeds/column", response_class=HTMLResponse)
 async def feeds_column(request: Request):
-    categories = []
-    for category_name, feeds in FEED_CATEGORIES.items():
-        all_feed_items = []
-        for feed_info in feeds:
-            items = parse_rss_feed(feed_info["url"])
-            all_feed_items.extend(items)
-        categories.append({"category": category_name, "feed_items": all_feed_items})
-    return templates.TemplateResponse("feeds-split.html", {"request": request, "categories": categories})
+    categories_list = []
+    for category in FEED_CATEGORIES.keys():
+        articles = get_articles_for_category_db(category, days=2)
+        categories_list.append({"category": category, "feed_items": articles})
+    return templates.TemplateResponse("feeds-split.html", {"request": request, "categories": categories_list})
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -216,7 +469,6 @@ async def home(request: Request):
 @app.get("/trends", response_class=HTMLResponse)
 async def trends(request: Request, source: str = "reddit"):
     if source == "twitter":
-        # Skip RSS feed processing if using Twitter
         channels = []
     else:
         feeds = RSS_FEED_URLS.get(source, RSS_FEED_URLS["reddit"])
@@ -224,27 +476,14 @@ async def trends(request: Request, source: str = "reddit"):
         for feed in feeds:
             items = parse_rss_feed(feed["url"])
             channels.append({"name": feed["name"], "feed_items": items})
-    
     context = {"request": request, "source": source, "channels": channels}
     if source == "twitter":
         context["nitter_url"] = "https://nitter.net/"
     return templates.TemplateResponse("trends.html", context)
 
-
-# ------------------ Projects Endpoints ------------------
-
-# Predefined categories and projects
-PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
-PROJECTS_ROOT = "/Users/krishna/Desktop/YouTube/YouTube"
-
-
-
-# ------------------ New Endpoint for Project Names ------------------
+# --- Projects Endpoints ---
 @app.get("/api/project_names", response_class=JSONResponse)
 async def project_names(category: str):
-    """
-    Return a list of existing project names within the given category.
-    """
     category_folder = os.path.join(PROJECTS_ROOT, category)
     projects = []
     if os.path.isdir(category_folder):
@@ -265,12 +504,7 @@ async def projects_view(request: Request):
                 for proj in os.listdir(cat_path):
                     proj_path = os.path.join(cat_path, proj)
                     if os.path.isdir(proj_path):
-                        md_file = os.path.join(proj_path, f"{proj}.md")
-                        snippet = ""
-                        if os.path.exists(md_file):
-                            with open(md_file, "r", encoding="utf-8") as f:
-                                snippet = f.read()[:200]
-                        project_list.append({"project": proj, "snippet": snippet})
+                        project_list.append({"project": proj})
                 projects_info.append({"category": category, "projects": project_list})
     return templates.TemplateResponse("projects.html", {
         "request": request,
@@ -290,6 +524,7 @@ async def create_project_endpoint(
         os.makedirs(project_folder, exist_ok=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating project folder: {str(e)}")
+    
     md_file_path = os.path.join(project_folder, f"{project_title}.md")
     if not os.path.exists(md_file_path):
         try:
@@ -297,6 +532,7 @@ async def create_project_endpoint(
                 f.write(f"# {project_title}\n\nCreated on: {datetime.now()}\n")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error creating Markdown file: {str(e)}")
+    
     return RedirectResponse(f"/projects/{category}/{project_title}", status_code=303)
 
 @app.get("/projects/{category}/{project}", response_class=HTMLResponse)
@@ -304,22 +540,17 @@ async def view_project_detail(request: Request, category: str, project: str):
     project_path = os.path.join(PROJECTS_ROOT, category, project)
     if not os.path.isdir(project_path):
         return HTMLResponse("Project not found", status_code=404)
-    md_file_path = os.path.join(project_path, f"{project}.md")
-    markdown_content = ""
-    if os.path.exists(md_file_path):
-        with open(md_file_path, "r", encoding="utf-8") as f:
-            markdown_content = f.read()
-    html_content = markdown2.markdown(markdown_content) if markdown_content else ""
+    
     files_in_project = []
     for item in os.listdir(project_path):
         item_path = os.path.join(project_path, item)
-        if os.path.isfile(item_path) and item != f"{project}.md":
+        if os.path.isfile(item_path):
             files_in_project.append(item)
+    
     return templates.TemplateResponse("project_detail.html", {
         "request": request,
         "category": category,
         "project": project,
-        "html_content": html_content,
         "files_in_project": files_in_project,
         "metube_url": "http://192.168.0.114:8081"
     })
@@ -348,12 +579,6 @@ async def upload_file(category: str, project: str, file: UploadFile = File(...))
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     return {"status": "success", "filename": file.filename}
 
-import os
-from datetime import datetime
-from fastapi import Form, HTTPException
-from newspaper import Article
-import html2text
-
 @app.post("/api/add_to_project")
 async def add_article_to_project(
     category: str = Form(...),
@@ -363,10 +588,6 @@ async def add_article_to_project(
     published: str = Form(...),
     description: str = Form(...)
 ):
-    """
-    Append an article's details + extracted Newspaper3k content (with images) 
-    to the project's Markdown file.
-    """
     project_folder = os.path.join(PROJECTS_ROOT, category, project)
     if not os.path.isdir(project_folder):
         raise HTTPException(status_code=404, detail="Project folder not found")
@@ -379,50 +600,31 @@ async def add_article_to_project(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error creating Markdown file: {str(e)}")
 
-    # 1) Fetch the article HTML (including images) via Newspaper3k
     try:
         art = Article(link, keep_article_html=True)
         art.download()
         art.parse()
-        # This gives us the article HTML
         content_html = art.article_html.strip() if art.article_html else ""
     except Exception as e:
         content_html = ""
         error_str = f"(Error extracting article HTML: {str(e)})"
 
-    # 2) Convert HTML to Markdown (preserving images)
     if content_html:
-        # Initialize html2text converter
-        converter = html2text.HTML2Text()
-        converter.ignore_images = False   # we want images
-        converter.ignore_links = False    # preserve links
-        converter.bypass_tables = False   # keep table structure if present
-        converter.body_width = 0          # disable forced line wrapping
-
-        try:
-            full_markdown = converter.handle(content_html)
-        except Exception as e:
-            full_markdown = f"(Error converting HTML to Markdown: {str(e)})"
+        full_markdown = convert_html_to_markdown(content_html)
     else:
-        # Fallback: if no HTML was extracted, fallback to Newspaper's plain text
         fallback_text = art.text.strip() if 'art' in locals() and art.text else ""
-        if fallback_text:
-            full_markdown = fallback_text
-        else:
-            full_markdown = error_str if 'error_str' in locals() else "(No article content found)"
+        full_markdown = fallback_text if fallback_text else error_str if 'error_str' in locals() else "(No article content found)"
 
-    # 3) Prepare the Markdown snippet with images
     snippet = (
         f"\n## Article: {title}\n\n"
-        f"**Link:** [{link}]({link})  \n"
-        f"**Published:** {published}  \n"
+        f"**Link:** [{link}]({link})\n"
+        f"**Published:** {published}\n"
         f"**Description:** {description}\n\n"
         f"### Content\n\n"
         f"{full_markdown}\n\n"
         f"---\n"
     )
 
-    # 4) Append the snippet to the project's markdown file
     try:
         with open(md_file_path, "a", encoding="utf-8") as f:
             f.write(snippet)
@@ -430,3 +632,105 @@ async def add_article_to_project(
         raise HTTPException(status_code=500, detail=f"Error appending to Markdown file: {str(e)}")
 
     return {"status": "success", "message": "Article added to project with images"}
+
+# --- Pixabay Endpoints ---
+@cache(expire=86400)
+async def get_pixabay_results(q: str, media_type: str, page: int):
+    if media_type == "image":
+        url = "https://pixabay.com/api/"
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "image_type": "photo",
+            "per_page": 12,
+            "page": page,
+            "safesearch": "true"
+        }
+    else:
+        url = "https://pixabay.com/api/videos/"
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": q,
+            "per_page": 12,
+            "page": page,
+            "safesearch": "true"
+        }
+    resp = await run_in_threadpool(requests.get, url, params=params, timeout=10)
+    await run_in_threadpool(resp.raise_for_status)
+    data = await run_in_threadpool(resp.json)
+    return data.get("hits", [])
+
+@app.get("/pixabay", response_class=HTMLResponse)
+async def pixabay_search(
+    request: Request,
+    category: str,
+    project: str,
+    q: str = "",
+    media_type: str = "image",
+    page: int = 1
+):
+    results = []
+    error_msg = ""
+    if q.strip():
+        try:
+            results = await get_pixabay_results(q, media_type, page)
+        except Exception as e:
+            logging.exception("Error searching Pixabay")
+            error_msg = f"Error searching Pixabay: {str(e)}"
+    
+    return templates.TemplateResponse("pixabay.html", {
+        "request": request,
+        "category": category,
+        "project": project,
+        "q": q,
+        "media_type": media_type,
+        "page": page,
+        "results": results,
+        "error_msg": error_msg
+    })
+
+def write_file(path, content):
+    with open(path, "wb") as f:
+        f.write(content)
+
+@app.post("/pixabay/download")
+async def pixabay_download(
+    request: Request,
+    category: str = Form(...),
+    project: str = Form(...),
+    download_url: str = Form(...),
+    filename: str = Form(...)
+):
+    project_folder = os.path.join(PROJECTS_ROOT, category, project)
+    if not os.path.isdir(project_folder):
+        raise HTTPException(status_code=404, detail="Project folder not found")
+    
+    local_path = os.path.join(project_folder, filename)
+    try:
+        resp = await run_in_threadpool(requests.get, url=download_url, timeout=10)
+        await run_in_threadpool(resp.raise_for_status)
+        content = resp.content
+        await run_in_threadpool(write_file, local_path, content)
+    except Exception as e:
+        logging.exception("Error downloading file")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+
+    if request.headers.get("HX-Request"):
+        return HTMLResponse(
+            f"""
+            <div class="alert alert-success shadow-lg mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current flex-shrink-0 h-6 w-6" 
+                   fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                      d="M9 12l2 2 4-4" />
+              </svg>
+              <span>Saved <strong>{filename}</strong> to <strong>{category}/{project}</strong>.</span>
+            </div>
+            """,
+            status_code=200
+        )
+    else:
+        return RedirectResponse(
+            url=f"/pixabay?category={category}&project={project}&downloaded={filename}",
+            status_code=303
+        )
