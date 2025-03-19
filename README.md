@@ -1,4 +1,4 @@
-## YouTube Workflow & Investing App
+## YouTube Workflow App
 
 **Note:** As this is a development preview, everything isn't straightforward, and you should know exactly what you're doing. The intention is to add more features with suggestions and contributions.
 
@@ -161,21 +161,6 @@ For beginners, here’s how you can add or update feeds:
 
    - **Directly from News Sites:** Many news sites offer their own RSS feeds.
    - **Using RSS Apps:** If a site doesn’t offer an RSS feed, you can use apps like Inoreader to generate one. Simply copy the feed URL provided by Inoreader and add it to your configuration.
-
-### Final Notes
-
-#### Documentation
-
-- Keeping a record of your processes and changes is essential. Document the feeds you add and any modifications you make for future reference.
-
-#### Security
-
-- Ensure that sensitive values (API keys, database credentials) are protected, especially in production.
-
-#### Continuous Improvement
-
-- Use this documentation as a starting point and update it as your application evolves.
-
 
 
 
