@@ -103,6 +103,12 @@ PROJECTS_ROOT = Config.PROJECTS_ROOT
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
 DAILY_REPORT_DIR = Config.DAILY_REPORT_DIR
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 # Indian Standard Time
 IST = pytz.timezone("Asia/Kolkata")
 
@@ -110,10 +116,7 @@ IST = pytz.timezone("Asia/Kolkata")
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-@app.on_event("startup")
-async def startup_event():
-    # Other startup tasks here (DB initialization, etc.)
-    asyncio.create_task(start_polling())
+
     
 # --- Database Setup ---
 def get_db_connection():
@@ -165,8 +168,24 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-# --- Scheduled Database Updates for Feeds ---
+def send_ntfy_notification(title: str, link: str):
+    """
+    Sends a notification via ntfy.
+    Replace 'your_topic' with your ntfy topic.
+    """
+    ntfy_url = "http://192.168.0.122:85/feeds"  # Change this to your actual ntfy topic
+    payload = f"New Article Added:\n{title}\n{link}"
+    try:
+        resp = requests.post(ntfy_url, data=payload)
+        resp.raise_for_status()
+        logging.info("Notification sent for article: '%s' | %s", title, link)
+    except Exception as e:
+        logging.exception("Failed to send notification for article: '%s' | %s | Error: %s", title, link, e)
+
 def format_datetime(dt_string):
+    """
+    Formats the datetime string into a friendly format.
+    """
     try:
         dt = date_parser.parse(dt_string)
         dt = dt.astimezone(IST)
@@ -182,30 +201,41 @@ def format_datetime(dt_string):
         return "No Date"
 
 def parse_and_store_rss_feed(rss_url: str, category: str):
+    """
+    Processes a single RSS feed:
+      - Fetches and parses the feed.
+      - For each article:
+          * Checks if the published date is within the last day.
+          * Performs a duplicate check against the database using the article link.
+          * Extracts content using Newspaper.
+          * Inserts the article into the DB if it is new.
+          * Sends an ntfy notification.
+    """
+    logging.info("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(rss_url, headers=headers, timeout=10)
         response.raise_for_status()
         feed = feedparser.parse(response.content)
+        
+        # Open a DB connection to check duplicates and insert new articles
         conn = get_db_connection()
         cur = conn.cursor()
+        
         for entry in feed.entries:
             title = getattr(entry, "title", "Untitled")
             link = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
+            
+            # Determine thumbnail URL
             thumbnail_url = None
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
             elif "media_content" in entry:
                 thumbnail_url = entry.media_content[0].get("url")
-            if not thumbnail_url and "<img" in description:
-                start = description.find("<img")
-                src_start = description.find('src="', start) + 5
-                src_end = description.find('"', src_start)
-                if src_start > 4 and src_end > src_start:
-                    thumbnail_url = description[src_start:src_end]
             if not thumbnail_url:
                 thumbnail_url = DEFAULT_THUMBNAIL
+            
             raw_published = getattr(entry, "published", None)
             try:
                 pub_dt = date_parser.parse(raw_published) if raw_published else None
@@ -213,37 +243,68 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 pub_dt = None
             published_formatted = format_datetime(raw_published) if raw_published else "No date"
             
-            cur.execute('SELECT id FROM "YouTube-articles" WHERE title = %s', (title,))
-            if cur.fetchone() is not None:
+            # Skip articles older than 1 day
+            if pub_dt and pub_dt < datetime.now(IST) - timedelta(days=1):
+                logging.info("Skipping old article: '%s'", title)
                 continue
-
+            
+            # Duplicate check: query the database using the article link
+            cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
+            if cur.fetchone() is not None:
+                logging.info("Duplicate article skipped: '%s'", title)
+                continue
+            
+            # Attempt to extract article content using Newspaper
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
                 art.parse()
                 if art.article_html:
-                    article_md = convert_html_to_markdown(art.article_html)
+                    article_content = art.article_html
                 else:
-                    article_md = art.text.strip()
+                    article_content = art.text
             except Exception as e:
                 logging.exception("Error extracting content for link %s: %s", link, e)
-                article_md = None
-
+                article_content = None
+            
+            # Insert the new article into the database
             cur.execute(
                 'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_md)
+                (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_content)
             )
-        conn.commit()
+            conn.commit()
+            logging.info("Inserted new article: '%s'", title)
+            
+            # Send an ntfy notification for the new article
+            send_ntfy_notification(title, link)
+        
         cur.close()
         conn.close()
+        
     except Exception as e:
-        logging.exception("Error parsing/storing feed for URL %s: %s", rss_url, e)
+        logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
+
 
 def fetch_all_feeds_db():
+    """
+    Called by the scheduler to update all feeds.
+    Logs the start and end time of the feed update and processes each feed.
+    """
+    start_time = datetime.now(IST)
+    logging.info("Feed update started at %s", start_time)
     for category, feeds in FEED_CATEGORIES.items():
         for feed in feeds:
-            parse_and_store_rss_feed(feed["url"], category)
-    logging.info("Feed update (DB) completed at %s", datetime.now())
+            logging.info("Processing feed: '%s' for category: '%s'", feed.get("name"), category)
+            try:
+                parse_and_store_rss_feed(feed["url"], category)
+            except Exception as e:
+                logging.exception("Error processing feed '%s' for category '%s': %s", feed.get("name"), category, e)
+    end_time = datetime.now(IST)
+    logging.info("Feed update completed at %s", end_time)
+
+if __name__ == "__main__":
+    # This would be called by your scheduler (e.g., APScheduler) in production
+    fetch_all_feeds_db()
 
 def get_articles_for_category_db(category: str, days: int = 2):
     threshold = datetime.now(IST) - timedelta(days=days)
@@ -729,192 +790,3 @@ async def pixabay_download(
 
 
 
-# --- Telegram & OpenRouter Setup ---
-TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN  # Set in your .env file
-openai.api_key = Config.OPENROUTER_API_KEY         # Set in your .env file
-openai.api_base = "https://openrouter.ai/api/v1"
-
-# Create the Telegram bot Application (using the async API)
-telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-
-# --- Command Handlers ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Welcome to the Workflow Bot!\n\n"
-        "Commands:\n"
-        "• /subscribe – Subscribe for new article notifications\n"
-        "• /unsubscribe – Unsubscribe from notifications\n"
-        "• /query <your query> – Search articles via AI\n"
-        "• /help – Show available commands"
-    )
-    await update.message.reply_text(text)
-
-
-async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    username = update.effective_chat.username or ""
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO telegram_subscribers (chat_id, username) VALUES (%s, %s) ON CONFLICT (chat_id) DO NOTHING",
-            (chat_id, username)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-        await update.message.reply_text("Subscribed successfully! You will now receive notifications.")
-    except Exception as e:
-        logging.exception("Subscription error")
-        await update.message.reply_text("Subscription failed. Please try again later.")
-
-
-async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM telegram_subscribers WHERE chat_id = %s", (chat_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        await update.message.reply_text("Unsubscribed successfully.")
-    except Exception as e:
-        logging.exception("Unsubscription error")
-        await update.message.reply_text("Unsubscription failed. Please try again later.")
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "Available commands:\n"
-        "/start – Start the bot\n"
-        "/subscribe – Subscribe for notifications\n"
-        "/unsubscribe – Unsubscribe from notifications\n"
-        "/query <query> – Search articles using AI\n"
-        "/help – Show this help message"
-    )
-    await update.message.reply_text(text)
-
-
-async def query_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Please provide a query. E.g., /query Trump and Musk")
-        return
-    query_text = " ".join(context.args)
-    response_text = await handle_ai_query(query_text)
-    await update.message.reply_text(response_text, disable_web_page_preview=True)
-
-
-async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Unknown command. Use /help to see available commands.")
-
-
-# --- AI Query Handling ---
-async def handle_ai_query(query_text: str) -> str:
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        three_months_ago = datetime.now(IST) - timedelta(days=90)
-        cur.execute(
-            """
-            SELECT title, description, link 
-            FROM "YouTube-articles" 
-            WHERE published_datetime >= %s 
-            ORDER BY published_datetime DESC 
-            LIMIT 10
-            """,
-            (three_months_ago,)
-        )
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        articles = "\n".join(
-            f"Title: {row[0]}\nDescription: {row[1]}\nLink: {row[2]}"
-            for row in rows
-        )
-        prompt = (
-            f"Given the following recent articles:\n\n{articles}\n\n"
-            f"Please answer the following query concisely:\n{query_text}"
-        )
-
-        def call_ai():
-            completion = openai.ChatCompletion.create(
-                model="google/gemma-3-27b-it",
-                messages=[{"role": "user", "content": prompt}],
-                extra_headers={
-                    "HTTP-Referer": Config.YOUR_SITE_URL if hasattr(Config, "YOUR_SITE_URL") else "",
-                    "X-Title": Config.YOUR_SITE_NAME if hasattr(Config, "YOUR_SITE_NAME") else "",
-                }
-            )
-            return completion.choices[0].message.content
-
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, call_ai)
-    except Exception as e:
-        logging.exception("Error in AI query")
-        return "Sorry, there was an error processing your query."
-
-
-# --- Setup Telegram Handlers ---
-def setup_telegram_handlers():
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("subscribe", subscribe))
-    telegram_app.add_handler(CommandHandler("unsubscribe", unsubscribe))
-    telegram_app.add_handler(CommandHandler("help", help_command))
-    telegram_app.add_handler(CommandHandler("query", query_command))
-    telegram_app.add_handler(MessageHandler(filters.COMMAND, unknown_command))
-
-
-setup_telegram_handlers()
-
-
-# --- Polling Runner ---
-async def start_polling():
-    # Run the bot in polling mode.
-    await telegram_app.run_polling()
-
-
-# --- Notification Helper ---
-def notify_subscribers(article: dict):
-    """
-    Call this function after inserting a new article.
-    'article' should be a dict with keys: title, description, link, and published.
-    """
-    async def _notify():
-        try:
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT chat_id FROM telegram_subscribers")
-            subscribers = cur.fetchall()
-            cur.close()
-            conn.close()
-            message = (
-                f"📰 *New Article Alert!*\n\n"
-                f"*{article['title']}*\n"
-                f"{article['description']}\n"
-                f"Published: {article['published']}\n"
-                f"[Read more]({article['link']})"
-            )
-            for (chat_id,) in subscribers:
-                try:
-                    await telegram_app.bot.send_message(
-                        chat_id=chat_id,
-                        text=message,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True
-                    )
-                except Exception as e:
-                    logging.exception("Failed to notify subscriber %s", chat_id)
-        except Exception as e:
-            logging.exception("Error notifying subscribers")
-    asyncio.create_task(_notify())
-
-
-# --- Expose Functions for Main App Integration ---
-__all__ = [
-    "telegram_app",
-    "start_polling",
-    "notify_subscribers",
-]
