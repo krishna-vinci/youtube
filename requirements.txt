@@ -18,3 +18,4 @@ python-multipart
 psycopg2-binary
 python-telegram-bot
 openai
+nest_asyncio
