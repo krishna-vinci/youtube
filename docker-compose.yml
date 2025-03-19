@@ -37,7 +37,7 @@ services:
       - PROJECTS_ROOT=${PROJECTS_ROOT}
       - DAILY_REPORT_DIR=${DAILY_REPORT_DIR}
     volumes:
-      - ${HOST_YOUTUBE_DATA}:/mnt/editing/youtube-data
+      - ${HOST_YOUTUBE_DATA}:${CONTAINER_YOUTUBE_DATA}
       - .:/app
     restart: unless-stopped
 
