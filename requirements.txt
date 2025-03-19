@@ -16,3 +16,5 @@ lxml[html_clean]
 jinja2
 python-multipart
 psycopg2-binary
+python-telegram-bot
+openai

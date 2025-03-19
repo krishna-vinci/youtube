@@ -20,8 +20,12 @@ class Config:
     RSSBRIDGE_HOST = os.getenv("RSSBRIDGE_HOST", "192.168.0.122:3333")
     METUBE_URL = os.getenv("METUBE_URL", "http://192.168.0.122:8081")
     NITTER_URL = os.getenv("NITTER_URL", "https://nitter.space")
+
+     # New variables for the Telegram bot and AI
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:2112")  # default for local
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     
     # Paths
-    HOST_YOUTUBE_DATA = os.getenv("HOST_YOUTUBE_DATA", "/mnt/editing/youtube-data")
-    PROJECTS_ROOT = os.getenv("PROJECTS_ROOT", "/Users/krishna/Desktop/YouTube/YouTube")
-    DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", "/Volumes/nfsdata/youtube/daily_report")
+    PROJECTS_ROOT = os.getenv("PROJECTS_ROOT", "/app/data/youtube-videos")
+    DAILY_REPORT_DIR = os.getenv("DAILY_REPORT_DIR", "/app/data/daily_report")
