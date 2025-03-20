@@ -38,6 +38,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import openai
 import asyncio
 from fastapi import FastAPI
+ 
 
 from config import Config  # Import our centralized config
 
@@ -102,6 +103,7 @@ PROJECTS_ROOT = Config.PROJECTS_ROOT
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
 DAILY_REPORT_DIR = Config.DAILY_REPORT_DIR
 
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -114,6 +116,8 @@ IST = pytz.timezone("Asia/Kolkata")
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+
+    
 # --- Database Setup ---
 def get_db_connection():
     conn_str = f"dbname={Config.DB_NAME} user={Config.DB_USER} password={Config.DB_PASSWORD} host={Config.DB_HOST} port={Config.DB_PORT}"
@@ -135,40 +139,6 @@ def init_db():
         content TEXT
     );
     """)
-    # Create a table to track the last update time per feed URL.
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS "FeedState" (
-         feed_url TEXT PRIMARY KEY,
-         last_update TIMESTAMP
-    );
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def get_feed_last_update(feed_url: str):
-    """
-    Returns the last update timestamp for the given feed.
-    If not found, returns None.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT last_update FROM "FeedState" WHERE feed_url = %s', (feed_url,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row[0] if row else None
-
-def update_feed_last_update(feed_url: str, new_update: datetime):
-    """
-    Updates (or inserts) the last update timestamp for a feed.
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        'INSERT INTO "FeedState" (feed_url, last_update) VALUES (%s, %s) ON CONFLICT (feed_url) DO UPDATE SET last_update = EXCLUDED.last_update',
-        (feed_url, new_update)
-    )
     conn.commit()
     cur.close()
     conn.close()
@@ -201,9 +171,9 @@ def convert_html_to_markdown(html_content: str) -> str:
 def send_ntfy_notification(title: str, link: str):
     """
     Sends a notification via ntfy.
-    Replace the ntfy_url with your actual ntfy topic endpoint.
+    Replace 'your_topic' with your ntfy topic.
     """
-    ntfy_url = "http://192.168.0.122:85/feeds"  # Change this to your actual ntfy endpoint
+    ntfy_url = "http://192.168.0.122:85/feeds"  # Change this to your actual ntfy topic
     payload = f"New Article Added:\n{title}\n{link}"
     try:
         resp = requests.post(ntfy_url, data=payload)
@@ -234,12 +204,12 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
     """
     Processes a single RSS feed:
       - Fetches and parses the feed.
-      - Determines a processing threshold using the feed’s last update state.
-      - For each entry published after the threshold:
-          * Performs a duplicate check (by article link).
+      - For each article:
+          * Checks if the published date is within the last day.
+          * Performs a duplicate check against the database using the article link.
           * Extracts content using Newspaper.
-          * Inserts the article into the DB and sends an ntfy notification.
-      - Updates the feed state if newer articles are found.
+          * Inserts the article into the DB if it is new.
+          * Sends an ntfy notification.
     """
     logging.info("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
@@ -248,17 +218,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
         response.raise_for_status()
         feed = feedparser.parse(response.content)
         
-        # Determine the threshold: use stored last update, or default to last 2 days.
-        last_update = get_feed_last_update(rss_url)
-        if last_update is None:
-            threshold = datetime.now(IST) - timedelta(days=2)
-        else:
-            threshold = last_update
-        
-        # Track the most recent article's publication time.
-        new_last_update = threshold
-        
-        # Open DB connection for duplicate checks and insertion.
+        # Open a DB connection to check duplicates and insert new articles
         conn = get_db_connection()
         cur = conn.cursor()
         
@@ -267,7 +227,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             link = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
             
-            # Determine thumbnail URL.
+            # Determine thumbnail URL
             thumbnail_url = None
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
@@ -283,26 +243,18 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 pub_dt = None
             published_formatted = format_datetime(raw_published) if raw_published else "No date"
             
-            if not pub_dt:
-                logging.info("Skipping article without publication date: '%s'", title)
+            # Skip articles older than 1 day
+            if pub_dt and pub_dt < datetime.now(IST) - timedelta(days=1):
+                logging.info("Skipping old article: '%s'", title)
                 continue
             
-            # Process only articles published after the threshold.
-            if pub_dt <= threshold:
-                logging.info("Skipping article before threshold: '%s'", title)
-                continue
-            
-            # Update the new_last_update if this article is more recent.
-            if pub_dt > new_last_update:
-                new_last_update = pub_dt
-            
-            # Duplicate check: ensure this article (by link) isn't already in the DB.
+            # Duplicate check: query the database using the article link
             cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
             if cur.fetchone() is not None:
                 logging.info("Duplicate article skipped: '%s'", title)
                 continue
             
-            # Extract article content.
+            # Attempt to extract article content using Newspaper
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
@@ -315,30 +267,28 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 logging.exception("Error extracting content for link %s: %s", link, e)
                 article_content = None
             
-            # Insert the new article.
+            # Insert the new article into the database
             cur.execute(
                 'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
                 (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_content)
             )
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
+            
+            # Send an ntfy notification for the new article
             send_ntfy_notification(title, link)
         
         cur.close()
         conn.close()
         
-        # Update the feed's last update state if new articles were processed.
-        if new_last_update > threshold:
-            update_feed_last_update(rss_url, new_last_update)
-            logging.info("Updated feed state for %s to %s", rss_url, new_last_update)
-        
     except Exception as e:
         logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
+
 
 def fetch_all_feeds_db():
     """
     Called by the scheduler to update all feeds.
-    Logs the start and end time and processes each feed.
+    Logs the start and end time of the feed update and processes each feed.
     """
     start_time = datetime.now(IST)
     logging.info("Feed update started at %s", start_time)
@@ -353,7 +303,7 @@ def fetch_all_feeds_db():
     logging.info("Feed update completed at %s", end_time)
 
 if __name__ == "__main__":
-    # This would be called by your scheduler (e.g., APScheduler) in production.
+    # This would be called by your scheduler (e.g., APScheduler) in production
     fetch_all_feeds_db()
 
 def get_articles_for_category_db(category: str, days: int = 2):
@@ -832,6 +782,7 @@ async def pixabay_download(
             url=f"/pixabay?category={category}&project={project}&downloaded={filename}",
             status_code=303
         )
+
 
 
 
