@@ -168,19 +168,7 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-def send_ntfy_notification(title: str, link: str):
-    """
-    Sends a notification via ntfy.
-    Replace 'your_topic' with your ntfy topic.
-    """
-    ntfy_url = "http://192.168.0.122:85/feeds"  # Change this to your actual ntfy topic
-    payload = f"New Article Added:\n{title}\n{link}"
-    try:
-        resp = requests.post(ntfy_url, data=payload)
-        resp.raise_for_status()
-        logging.info("Notification sent for article: '%s' | %s", title, link)
-    except Exception as e:
-        logging.exception("Failed to send notification for article: '%s' | %s | Error: %s", title, link, e)
+
 
 def format_datetime(dt_string):
     """
@@ -200,6 +188,23 @@ def format_datetime(dt_string):
     except Exception:
         return "No Date"
 
+
+
+def send_ntfy_notification(title: str, link: str):
+    """
+    Sends a notification via ntfy.
+    Replace the ntfy_url with your actual ntfy topic endpoint.
+    """
+    ntfy_url = "http://192.168.0.122:85/feeds"  # Change this to your actual ntfy topic endpoint
+    payload = f"New Article Added:\n{title}\n{link}"
+    try:
+        resp = requests.post(ntfy_url, data=payload)
+        resp.raise_for_status()
+        logging.info("Notification sent for article: '%s' | %s", title, link)
+    except Exception as e:
+        logging.exception("Failed to send notification for article: '%s' | %s | Error: %s", title, link, e)
+
+
 def parse_and_store_rss_feed(rss_url: str, category: str):
     """
     Processes a single RSS feed:
@@ -218,7 +223,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
         response.raise_for_status()
         feed = feedparser.parse(response.content)
         
-        # Open a DB connection to check duplicates and insert new articles
+        # Open a DB connection once per feed update.
         conn = get_db_connection()
         cur = conn.cursor()
         
@@ -227,7 +232,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             link = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
             
-            # Determine thumbnail URL
+            # Determine thumbnail URL.
             thumbnail_url = None
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
@@ -243,18 +248,18 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 pub_dt = None
             published_formatted = format_datetime(raw_published) if raw_published else "No date"
             
-            # Skip articles older than 1 day
+            # Skip articles older than 1 day.
             if pub_dt and pub_dt < datetime.now(IST) - timedelta(days=1):
                 logging.info("Skipping old article: '%s'", title)
                 continue
             
-            # Duplicate check: query the database using the article link
+            # Duplicate check: query the database using the article link.
             cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
             if cur.fetchone() is not None:
                 logging.info("Duplicate article skipped: '%s'", title)
                 continue
             
-            # Attempt to extract article content using Newspaper
+            # Attempt to extract article content using Newspaper.
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
@@ -267,7 +272,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 logging.exception("Error extracting content for link %s: %s", link, e)
                 article_content = None
             
-            # Insert the new article into the database
+            # Insert the new article into the database.
             cur.execute(
                 'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
                 (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_content)
@@ -275,7 +280,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
             
-            # Send an ntfy notification for the new article
+            # Send an ntfy notification for the new article.
             send_ntfy_notification(title, link)
         
         cur.close()
@@ -283,6 +288,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
         
     except Exception as e:
         logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
+
 
 
 def fetch_all_feeds_db():
