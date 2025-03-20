@@ -2,6 +2,8 @@
 
 **Note:** As this is a development preview, everything isn't straightforward, and you should know exactly what you're doing. The intention is to add more features with suggestions and contributions.
 
+**New integration added ntfy for push notifications. install ntfy using docker, add url in main.py for now, next update we will have it in .env eg url: http://192.168.0.101:3000/feeds**
+
 This application aggregates content from various sources, processes articles, and provides an interactive interface for managing projects and media. It combines a powerful FastAPI backend with a modern, dynamic frontend built using HTMX, Tailwind CSS, and Alpine.js.
 
 ### Features
