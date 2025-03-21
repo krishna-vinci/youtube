@@ -217,15 +217,28 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-def send_ntfy_notification(title: str, link: str):
-    ntfy_url = "http://192.168.0.122:85/feeds"  # Replace with your ntfy endpoint
-    payload = f"New Article Added:\n{title}\n{link}"
+def send_ntfy_notification(title: str, link: str, thumbnail: str, description: str, category: str):
+    # Normalize category for topic naming: lowercase and replace spaces with hyphens
+    topic = category.lower().replace(" ", "-")
+    ntfy_url = f"http://192.168.0.122:85/feeds/{topic}"  # e.g., http://192.168.0.122:85/feeds/technology
+    
+    # Create a payload with the title as a clickable Markdown link
+    payload = (
+        f"[{title}]({link})\n\n"  # The title is now a clickable link
+        f"Thumbnail: {thumbnail}\n\n"
+        f"Description: {description}"
+    )
+    
+    # Tell ntfy to treat the payload as Markdown
+    headers = {"X-Ntfy-Format": "markdown"}
+    
     try:
-        resp = requests.post(ntfy_url, data=payload)
+        resp = requests.post(ntfy_url, data=payload, headers=headers)
         resp.raise_for_status()
-        logging.info("Notification sent for article: '%s' | %s", title, link)
+        logging.info("Notification sent for article: '%s' in category '%s'", title, category)
     except Exception as e:
-        logging.exception("Failed to send notification for article: '%s' | %s | Error: %s", title, link, e)
+        logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
+
 
 def format_datetime(dt_string):
     try:
@@ -323,7 +336,8 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             )
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
-            send_ntfy_notification(title, link)
+            send_ntfy_notification(title, link, thumbnail_url, description, category)
+
         
         cur.close()
         conn.close()
