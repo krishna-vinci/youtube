@@ -218,18 +218,19 @@ def convert_html_to_markdown(html_content: str) -> str:
         return html_content
 
 def send_ntfy_notification(title: str, link: str, thumbnail: str, description: str, category: str):
-    # Normalize category for topic naming: lowercase and replace spaces with hyphens
-    topic = category.lower().replace(" ", "-")
-    ntfy_url = f"http://192.168.0.122:85/feeds/{topic}"  # e.g., http://192.168.0.122:85/feeds/technology
-    
-    # Create a payload with the title as a clickable Markdown link
+    # Normalize category for a valid topic: lowercase and replace spaces with hyphens
+    topic = f"feeds-{category.lower().replace(' ', '-')}"
+    # Construct the URL using the valid topic (no slashes)
+    ntfy_url = f"http://localhost:85/{topic}"  # e.g., http://localhost:85/feeds-technology
+
+    # Build a payload with the title as a clickable Markdown link
     payload = (
-        f"[{title}]({link})\n\n"  # The title is now a clickable link
+        f"[{title}]({link})\n\n"  # Title is embedded as a clickable link
         f"Thumbnail: {thumbnail}\n\n"
         f"Description: {description}"
     )
     
-    # Tell ntfy to treat the payload as Markdown
+    # Specify that the payload is in Markdown
     headers = {"X-Ntfy-Format": "markdown"}
     
     try:
@@ -238,7 +239,6 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, description: s
         logging.info("Notification sent for article: '%s' in category '%s'", title, category)
     except Exception as e:
         logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
-
 
 def format_datetime(dt_string):
     try:
