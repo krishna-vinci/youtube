@@ -220,6 +220,7 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 
 
+
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
 def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
@@ -228,23 +229,20 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
 
     headers = {
         "Title": title,
-        "X-Ntfy-Format": "markdown",
+        "Attach": thumbnail,
+        # Try a minimal filename (like a single character or blank)
+        "Filename": "img.jpg",
         "Click": link
     }
 
-    # Embed the image in the payload using Markdown syntax.
-    # Note: This does not produce a true inline preview in the ntfy Android client.
-    payload = f"![Image]({thumbnail})"
+    # Empty body or minimal body
+    payload = ""
 
     try:
-        resp = requests.post(ntfy_url, headers=headers, data=payload)
-        resp.raise_for_status()
-        logging.info("Notification sent for article '%s' in category '%s'", title, category)
+        requests.post(ntfy_url, headers=headers, data=payload).raise_for_status()
     except Exception as e:
-        logging.exception(
-            "Failed to send notification for article '%s' in category '%s': %s",
-            title, category, e
-        )
+        logging.exception("Failed to send notification: %s", e)
+
 
 # ---- ntfy end ----- #
 
