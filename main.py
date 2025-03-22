@@ -246,9 +246,9 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
             title, category, e
         )
 
+# ---- ntfy end ----- #
 
 
- 
 
 
 
