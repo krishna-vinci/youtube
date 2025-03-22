@@ -217,8 +217,6 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-
-
 # Strictly require NTFY_BASE_URL in your .env (KeyError if missing)
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
@@ -243,6 +241,9 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
             title, category, e
         )
 
+
+
+ 
 
 
 
