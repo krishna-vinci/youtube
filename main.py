@@ -91,7 +91,7 @@ FEED_CATEGORIES = {
     "Hindu Sci and Tech": [
         {
             "name": "The Hindu Sci & Tech",
-            "url": "https://www.thehindu.com/sci-tech/technology/?service=rss"
+            "url": "https://www.thehindu.com/news/?service=rss"
         }
     ]
 }
@@ -217,27 +217,39 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-def send_ntfy_notification(title: str, link: str, thumbnail: str, description: str, category: str):
-    # Normalize category for topic naming: lowercase and replace spaces with hyphens
-    topic = category.lower().replace(" ", "-")
-    ntfy_url = f"http://192.168.0.122:85/feeds/{topic}"  # e.g., http://192.168.0.122:85/feeds/technology
+##### Ntfy start #####
+
+# Load the ntfy base URL from the environment, with a default if not set
+NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
+
+def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
+    # Normalize category for a valid topic: lowercase and replace spaces with hyphens
+    topic = f"feeds-{category.lower().replace(' ', '-')}"
+    # Construct the URL using the ntfy base URL from .env and the valid topic
+    ntfy_url = f"{NTFY_BASE_URL}/{topic}"
     
-    # Create a payload with the title as a clickable Markdown link
-    payload = (
-        f"[{title}]({link})\n\n"  # The title is now a clickable link
-        f"Thumbnail: {thumbnail}\n\n"
-        f"Description: {description}"
-    )
+    # Use ntfy headers to format the notification as a "card":
+    #   - Title: the article's title (displayed in bold)
+    #   - Attach: the thumbnail (for an image preview in ntfy)
+    #   - Click: the URL to open when tapping the notification
+    headers = {
+        "Title": title,
+        "Attach": thumbnail,
+        "Click": link
+    }
     
-    # Tell ntfy to treat the payload as Markdown
-    headers = {"X-Ntfy-Format": "markdown"}
+    # Since we don't want a description in the payload, we'll keep it empty.
+    payload = ""
     
     try:
-        resp = requests.post(ntfy_url, data=payload, headers=headers)
+        resp = requests.post(ntfy_url, headers=headers, data=payload)
         resp.raise_for_status()
         logging.info("Notification sent for article: '%s' in category '%s'", title, category)
     except Exception as e:
         logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
+
+
+##### Ntfy end #####
 
 
 def format_datetime(dt_string):
@@ -336,7 +348,8 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             )
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
-            send_ntfy_notification(title, link, thumbnail_url, description, category)
+            send_ntfy_notification(title, link, thumbnail_url, category)
+
 
         
         cur.close()
