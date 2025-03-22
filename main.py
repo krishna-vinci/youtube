@@ -217,7 +217,7 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-##### Ntfy start #####
+
 
 # Load the ntfy base URL from the environment, with a default if not set
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
@@ -249,7 +249,7 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
         logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
 
 
-##### Ntfy end #####
+
 
 
 def format_datetime(dt_string):
