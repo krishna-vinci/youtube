@@ -219,34 +219,30 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 
 
-# Load the ntfy base URL from the environment, with a default if not set
+# Strictly require NTFY_BASE_URL in your .env (KeyError if missing)
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
 def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
-    # Normalize category for a valid topic: lowercase and replace spaces with hyphens
     topic = f"feeds-{category.lower().replace(' ', '-')}"
-    # Construct the URL using the ntfy base URL from .env and the valid topic
     ntfy_url = f"{NTFY_BASE_URL}/{topic}"
-    
-    # Use ntfy headers to format the notification as a "card":
-    #   - Title: the article's title (displayed in bold)
-    #   - Attach: the thumbnail (for an image preview in ntfy)
-    #   - Click: the URL to open when tapping the notification
+
     headers = {
         "Title": title,
         "Attach": thumbnail,
         "Click": link
     }
-    
-    # Since we don't want a description in the payload, we'll keep it empty.
-    payload = ""
-    
+
+    # No body payload — we don’t want description text in the notification
     try:
-        resp = requests.post(ntfy_url, headers=headers, data=payload)
+        resp = requests.post(ntfy_url, headers=headers, data="")
         resp.raise_for_status()
-        logging.info("Notification sent for article: '%s' in category '%s'", title, category)
+        logging.info("Notification sent for article '%s' in category '%s'", title, category)
     except Exception as e:
-        logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
+        logging.exception(
+            "Failed to send notification for article '%s' in category '%s': %s",
+            title, category, e
+        )
+
 
 
 
