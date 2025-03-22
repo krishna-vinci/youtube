@@ -91,7 +91,7 @@ FEED_CATEGORIES = {
     "Hindu Sci and Tech": [
         {
             "name": "The Hindu Sci & Tech",
-            "url": "https://www.thehindu.com/sci-tech/technology/?service=rss"
+            "url": "https://www.thehindu.com/news/?service=rss"
         }
     ]
 }
@@ -217,28 +217,37 @@ def convert_html_to_markdown(html_content: str) -> str:
         logging.exception("Error converting HTML to Markdown: %s", e)
         return html_content
 
-def send_ntfy_notification(title: str, link: str, thumbnail: str, description: str, category: str):
-    # Normalize category for a valid topic: lowercase and replace spaces with hyphens
-    topic = f"feeds-{category.lower().replace(' ', '-')}"
-    # Construct the URL using the valid topic (no slashes)
-    ntfy_url = f"http://localhost:85/{topic}"  # e.g., http://localhost:85/feeds-technology
+# Strictly require NTFY_BASE_URL in your .env (KeyError if missing)
+NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
-    # Build a payload with the title as a clickable Markdown link
-    payload = (
-        f"[{title}]({link})\n\n"  # Title is embedded as a clickable link
-        f"Thumbnail: {thumbnail}\n\n"
-        f"Description: {description}"
-    )
-    
-    # Specify that the payload is in Markdown
-    headers = {"X-Ntfy-Format": "markdown"}
-    
+def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
+    topic = f"feeds-{category.lower().replace(' ', '-')}"
+    ntfy_url = f"{NTFY_BASE_URL}/{topic}"
+
+    headers = {
+        "Title": title,
+        "Attach": thumbnail,
+        "Click": link
+    }
+
+    # No body payload — we don’t want description text in the notification
     try:
-        resp = requests.post(ntfy_url, data=payload, headers=headers)
+        resp = requests.post(ntfy_url, headers=headers, data="")
         resp.raise_for_status()
-        logging.info("Notification sent for article: '%s' in category '%s'", title, category)
+        logging.info("Notification sent for article '%s' in category '%s'", title, category)
     except Exception as e:
-        logging.exception("Failed to send notification for article: '%s' in category '%s' | Error: %s", title, category, e)
+        logging.exception(
+            "Failed to send notification for article '%s' in category '%s': %s",
+            title, category, e
+        )
+
+
+
+ 
+
+
+
+
 
 def format_datetime(dt_string):
     try:
@@ -336,7 +345,8 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             )
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
-            send_ntfy_notification(title, link, thumbnail_url, description, category)
+            send_ntfy_notification(title, link, thumbnail_url, category)
+
 
         
         cur.close()
