@@ -2,7 +2,9 @@
 
 **Note:** As this is a development preview, everything isn't straightforward, and you should know exactly what you're doing. The intention is to add more features with suggestions and contributions.
 
-**New integration added ntfy for push notifications per category. install ntfy using docker, add url in .env eg url: http://192.168.0.101:3000/feeds-(category name)**
+**New integration added ntfy for push notifications per category. install ntfy using docker, add url in .env eg url: http://192.168.0.101:3000/feeds-(category_name)**
+![2025-03-22 13 27 54](https://github.com/user-attachments/assets/d604da5c-092a-4003-8ac6-e1faf67a9e7c)
+
 
 This application aggregates content from various sources, processes articles, and provides an interactive interface for managing projects and media. It combines a powerful FastAPI backend with a modern, dynamic frontend built using HTMX, Tailwind CSS, and Alpine.js.
 
