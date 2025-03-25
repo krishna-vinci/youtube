@@ -242,8 +242,8 @@ def convert_html_to_markdown(html_content: str) -> str:
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
 def sanitize_text(text):
-    return text.replace(u'\u2019', "'")
-
+    # Replace smart quotes with standard quotes
+    return text.replace(u'\u2019', "'").replace(u'\u201c', '"').replace(u'\u201d', '"')
 
 def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
     title = sanitize_text(title)
@@ -260,10 +260,8 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
         response = requests.post(ntfy_url, headers=headers, data=payload)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
-        # Log the error
         logging.exception("Failed to send notification: %s", e)
-        # Optionally, wait before trying the next notification to avoid rate limits
-        time.sleep(1)
+
 
 
 # ---- ntfy end ----- #
