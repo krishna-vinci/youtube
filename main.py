@@ -251,16 +251,20 @@ def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str)
     ntfy_url = f"{NTFY_BASE_URL}/{topic}"
     headers = {
         "Title": title,
-        "Attach": thumbnail,
-        "Filename": "img.jpg",
-        "Click": link
+        "Click": link,
+        "Filename": "img.jpg"
     }
+    # Only include the Attach header if thumbnail is a valid absolute URL.
+    if thumbnail.startswith("http"):
+        headers["Attach"] = thumbnail
+
     payload = ""
     try:
         response = requests.post(ntfy_url, headers=headers, data=payload)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         logging.exception("Failed to send notification: %s", e)
+
 
 
 
