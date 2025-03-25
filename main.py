@@ -93,8 +93,15 @@ FEED_CATEGORIES = {
             "name": "The Hindu Sci & Tech",
             "url": "https://www.thehindu.com/news/?service=rss"
         }
+    ],
+    "Google India": [
+        {
+            "name": "Google India News",
+            "url": "https://news.google.com/news/rss/search?q=India&hl=en-IN&gl=IN&ceid=IN:en"
+        }
     ]
 }
+
 
 PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
 PROJECTS_ROOT = Config.PROJECTS_ROOT
