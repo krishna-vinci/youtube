@@ -230,25 +230,30 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
+def sanitize_text(text):
+    return text.replace(u'\u2019', "'")
+
+import time
+
 def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
+    title = sanitize_text(title)
     topic = f"feeds-{category.lower().replace(' ', '-')}"
     ntfy_url = f"{NTFY_BASE_URL}/{topic}"
-
     headers = {
         "Title": title,
         "Attach": thumbnail,
-        # Try a minimal filename (like a single character or blank)
         "Filename": "img.jpg",
         "Click": link
     }
-
-    # Empty body or minimal body
     payload = ""
-
     try:
-        requests.post(ntfy_url, headers=headers, data=payload).raise_for_status()
-    except Exception as e:
+        response = requests.post(ntfy_url, headers=headers, data=payload)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        # Log the error
         logging.exception("Failed to send notification: %s", e)
+        # Optionally, wait before trying the next notification to avoid rate limits
+        time.sleep(1)
 
 
 # ---- ntfy end ----- #
