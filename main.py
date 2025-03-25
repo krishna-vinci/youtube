@@ -37,6 +37,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import openai
 import asyncio
 from fastapi import FastAPI
+import time
 
 from config import Config  # Import our centralized config
 
@@ -76,13 +77,22 @@ RSS_FEED_URLS = {
 }
 
 FEED_CATEGORIES = {
-    "Technology": [
+    "Tech news": [
         {
             "name": "TechCrunch",
             "url": "https://techcrunch.com/feed/"
+            
+        },
+
+        {
+
+            "name": 'techradar',
+            "url": "https://www.techradar.com/rss"
         }
+
+        
     ],
-    "Science": [
+    "Science news": [
         {
             "name": "New Scientist",
             "url": "https://feeds.newscientist.com/science-news"
@@ -97,9 +107,10 @@ FEED_CATEGORIES = {
     "Google India": [
         {
             "name": "Google India News",
-            "url": "https://news.google.com/news/rss/search?q=India&hl=en-IN&gl=IN&ceid=IN:en"
+            "url": "https://www.bloombergquint.com/stories.rss"
         }
     ]
+
 }
 
 
@@ -233,7 +244,6 @@ NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 def sanitize_text(text):
     return text.replace(u'\u2019', "'")
 
-import time
 
 def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
     title = sanitize_text(title)
