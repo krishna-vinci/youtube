@@ -77,13 +77,22 @@ RSS_FEED_URLS = {
 }
 
 FEED_CATEGORIES = {
-    "Technology": [
+    "Tech news": [
         {
             "name": "TechCrunch",
             "url": "https://techcrunch.com/feed/"
+            
+        },
+
+        {
+
+            "name": 'techradar',
+            "url": "https://www.techradar.com/rss"
         }
+
+        
     ],
-    "Science": [
+    "Science news": [
         {
             "name": "New Scientist",
             "url": "https://feeds.newscientist.com/science-news"
@@ -101,6 +110,7 @@ FEED_CATEGORIES = {
             "url": "https://www.bloombergquint.com/stories.rss"
         }
     ]
+
 }
 
 
