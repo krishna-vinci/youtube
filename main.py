@@ -38,6 +38,7 @@ import openai
 import asyncio
 from fastapi import FastAPI
 import time
+import unicodedata
 
 from config import Config  # Import our centralized config
 
@@ -241,26 +242,30 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 NTFY_BASE_URL = os.environ["NTFY_BASE_URL"]
 
-def sanitize_text(text):
-    # Replace smart quotes with standard quotes
-    return text.replace(u'\u2019', "'").replace(u'\u201c', '"').replace(u'\u201d', '"')
 
-def send_ntfy_notification(title: str, link: str, thumbnail: str, category: str):
+
+def sanitize_text(text):
+    # Normalize the text (NFKD) and then encode/decode to strip out non-Latin-1 characters.
+    normalized = unicodedata.normalize('NFKD', text)
+    return normalized.encode('latin1', 'ignore').decode('latin1')
+
+def send_ntfy_notification(title: str, link: str, description: str, category: str):
+    # Sanitize the title to remove problematic Unicode characters.
     title = sanitize_text(title)
     topic = f"feeds-{category.lower().replace(' ', '-')}"
     ntfy_url = f"{NTFY_BASE_URL}/{topic}"
+    
+    # Build headers without any thumbnail.
     headers = {
         "Title": title,
         "Click": link,
-        "Filename": "img.jpg"
     }
-    # Only include the Attach header if thumbnail is a valid absolute URL.
-    if thumbnail.startswith("http"):
-        headers["Attach"] = thumbnail
+    
+    # Use a snippet from the description as the payload.
+    payload = description[:200]  # Adjust length as needed
 
-    payload = ""
     try:
-        response = requests.post(ntfy_url, headers=headers, data=payload)
+        response = requests.post(ntfy_url, headers=headers, data=payload.encode('utf-8'))
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         logging.exception("Failed to send notification: %s", e)
@@ -292,12 +297,11 @@ def format_datetime(dt_string):
         return "No Date"
 
 
-# --- Updated Feed Parsing Function ---
 def parse_and_store_rss_feed(rss_url: str, category: str):
     logging.debug("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(rss_url, headers=headers, timeout=10)
+        headers_req = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(rss_url, headers=headers_req, timeout=10)
         response.raise_for_status()
         feed = feedparser.parse(response.content)
         
@@ -318,7 +322,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             link = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
             
-            # Determine thumbnail URL.
+            # Determine thumbnail URL (for DB storage only)
             thumbnail_url = None
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
@@ -372,9 +376,9 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
             )
             conn.commit()
             logging.info("Inserted new article: '%s'", title)
-            send_ntfy_notification(title, link, thumbnail_url, category)
-
-
+            
+            # Send notification using title, link, and description (no thumbnail).
+            send_ntfy_notification(title, link, description, category)
         
         cur.close()
         conn.close()
