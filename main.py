@@ -249,20 +249,17 @@ def sanitize_text(text):
     normalized = unicodedata.normalize('NFKD', text)
     return normalized.encode('latin1', 'ignore').decode('latin1')
 
-def send_ntfy_notification(title: str, link: str, description: str, category: str):
-    # Sanitize the title to remove problematic Unicode characters.
+def send_ntfy_notification(title: str, link: str, description: str, category: str, source: str):
     title = sanitize_text(title)
     topic = f"feeds-{category.lower().replace(' ', '-')}"
     ntfy_url = f"{NTFY_BASE_URL}/{topic}"
-    
-    # Build headers without any thumbnail.
+
     headers = {
         "Title": title,
         "Click": link,
     }
-    
-    # Use a snippet from the description as the payload.
-    payload = description[:200]  # Adjust length as needed
+
+    payload = f"{description[:160]}... (via {source})"
 
     try:
         response = requests.post(ntfy_url, headers=headers, data=payload.encode('utf-8'))
@@ -297,32 +294,29 @@ def format_datetime(dt_string):
         return "No Date"
 
 
-def parse_and_store_rss_feed(rss_url: str, category: str):
+def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Unknown"):
     logging.debug("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
         headers_req = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(rss_url, headers=headers_req, timeout=10)
         response.raise_for_status()
         feed = feedparser.parse(response.content)
-        
-        # Determine threshold: use stored last update or default to last 2 days.
+
         last_update = get_feed_last_update(rss_url)
         if last_update is None:
             threshold = datetime.now(IST) - timedelta(days=2)
         else:
             threshold = ensure_aware(last_update, IST)
-        
+
         new_last_update = threshold
-        
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         for entry in feed.entries:
             title = getattr(entry, "title", "Untitled")
             link = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
-            
-            # Determine thumbnail URL (for DB storage only)
+
             thumbnail_url = None
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
@@ -330,63 +324,50 @@ def parse_and_store_rss_feed(rss_url: str, category: str):
                 thumbnail_url = entry.media_content[0].get("url")
             if not thumbnail_url:
                 thumbnail_url = DEFAULT_THUMBNAIL
-            
+
             raw_published = getattr(entry, "published", None)
             try:
                 pub_dt = date_parser.parse(raw_published) if raw_published else None
             except Exception:
                 pub_dt = None
-            
-            # Ensure pub_dt is timezone-aware.
+
             pub_dt = ensure_aware(pub_dt, IST)
             published_formatted = format_datetime(raw_published) if raw_published else "No date"
-            
-            if not pub_dt:
-                logging.debug("Skipping article without publication date: '%s'", title)
+
+            if not pub_dt or pub_dt <= threshold:
                 continue
-            
-            if pub_dt <= threshold:
-                logging.debug("Skipping article before threshold: '%s'", title)
-                continue
-            
+
             if pub_dt > new_last_update:
                 new_last_update = pub_dt
-            
-            # Duplicate check.
+
             cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
             if cur.fetchone() is not None:
-                logging.debug("Duplicate article skipped: '%s'", title)
                 continue
-            
+
             try:
                 art = Article(link, keep_article_html=True)
                 art.download()
                 art.parse()
-                if art.article_html:
-                    article_content = art.article_html
-                else:
-                    article_content = art.text
+                article_content = art.article_html if art.article_html else art.text
             except Exception as e:
                 logging.exception("Error extracting content for link %s: %s", link, e)
                 article_content = None
-            
+
             cur.execute(
-                'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
-                (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_content)
+                'INSERT INTO "YouTube-articles" (title, link, description, thumbnail, published, published_datetime, category, content, source) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
+                (title, link, description, thumbnail_url, published_formatted, pub_dt, category, article_content, source_name)
             )
             conn.commit()
-            logging.info("Inserted new article: '%s'", title)
-            
-            # Send notification using title, link, and description (no thumbnail).
-            send_ntfy_notification(title, link, description, category)
-        
+
+            send_ntfy_notification(title, link, description, category, source_name)
+
         cur.close()
         conn.close()
-        
+
         if new_last_update > threshold:
             update_feed_last_update(rss_url, new_last_update)
             logging.info("Updated feed state for %s to %s", rss_url, new_last_update)
-        
+
     except Exception as e:
         logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
 
@@ -398,11 +379,12 @@ def fetch_all_feeds_db():
         for feed in feeds:
             logging.info("Processing feed: '%s' for category: '%s'", feed.get("name"), category)
             try:
-                parse_and_store_rss_feed(feed["url"], category)
+                parse_and_store_rss_feed(feed["url"], category, source_name=feed.get("name", "Unknown"))
             except Exception as e:
                 logging.exception("Error processing feed '%s' for category '%s': %s", feed.get("name"), category, e)
     end_time = datetime.now(IST)
     logging.info("Feed update completed at %s", end_time)
+
 
 if __name__ == "__main__":
     fetch_all_feeds_db()
@@ -412,7 +394,7 @@ def get_articles_for_category_db(category: str, days: int = 2):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        'SELECT title, link, description, thumbnail, published, published_datetime, category, content FROM "YouTube-articles" WHERE category = %s AND published_datetime >= %s ORDER BY published_datetime DESC',
+        'SELECT title, link, description, thumbnail, published, published_datetime, category, content, source FROM "YouTube-articles" WHERE category = %s AND published_datetime >= %s ORDER BY published_datetime DESC',
         (category, threshold)
     )
     rows = cur.fetchall()
@@ -426,11 +408,13 @@ def get_articles_for_category_db(category: str, days: int = 2):
             "published": row[4],
             "published_datetime": row[5],
             "category": row[6],
-            "content": row[7]
+            "content": row[7],
+            "source": row[8] or "Unknown"
         })
     cur.close()
     conn.close()
     return articles
+
 
 @app.get("/daily-report-md", response_class=JSONResponse)
 async def daily_report_md(timeframe: str = Query("last24", description="Options: last24, yesterday, week")):
