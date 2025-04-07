@@ -78,44 +78,46 @@ RSS_FEED_URLS = {
 }
 
 FEED_CATEGORIES = {
-    "Tech news": [
-        {
-            "name": "TechCrunch",
-            "url": "https://techcrunch.com/feed/"
-            
-        },
-
-        {
-
-            "name": 'techradar',
-            "url": "https://www.techradar.com/rss"
-        }
-
-        
+    "World Tech": [
+        {"name": "Ars Technica", "url": "https://feeds.arstechnica.com/arstechnica/index/"},
+        {"name": "Wired", "url": "https://www.wired.com/feed/rss"},
+        {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+        {"name": "IEEE Spectrum", "url": "https://spectrum.ieee.org/rss/fulltext"},
+        {"name": "TechRadar", "url": "https://www.techradar.com/rss"}
     ],
-    "Science news": [
-        {
-            "name": "New Scientist",
-            "url": "https://feeds.newscientist.com/science-news"
-        }
+
+    "India Tech": [
+        {"name": "Medianama", "url": "https://www.medianama.com/feed/"},
+        {"name": "Business Standard – Tech", "url": "https://www.business-standard.com/rss/technology-108.rss"}
     ],
-    "Hindu Sci and Tech": [
-        {
-            "name": "The Hindu Sci & Tech",
-            "url": "https://www.thehindu.com/news/?service=rss"
-        }
+
+    "World News": [
+        {"name": "Reuters World", "url": "https://www.reutersagency.com/feed/?best-topics=world"},
+        {"name": "Al Jazeera", "url": "https://www.aljazeera.com/xml/rss/all.xml"}
     ],
-    "Google India": [
-        {
-            "name": "Google India News",
-            "url": "https://www.bloombergquint.com/stories.rss"
-        }
+
+    "India News": [
+        {"name": "The Hindu", "url": "https://www.thehindu.com/news/?service=rss"},
+        {"name": "Indian Express Explained", "url": "https://indianexpress.com/section/explained/feed/"}
+    ],
+
+    "World Commentary": [
+        {"name": "Foreign Affairs", "url": "https://www.foreignaffairs.com/rss.xml"},
+        {"name": "The Atlantic – Ideas", "url": "https://www.theatlantic.com/feed/channel/ideas/"},
+        {"name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/"},
+        {"name": "The Economist", "url": "https://www.economist.com/latest/rss.xml"}
+    ],
+
+    "India Commentary": [
+        {"name": "The Print – Opinion", "url": "https://theprint.in/category/opinion/feed/"},
+        {"name": "Scroll.in – Featured", "url": "https://scroll.in/feed"}
     ]
-
 }
 
 
-PREDEFINED_CATEGORIES = ["SciTech", "Cooking", "Vlogs"]
+
+
+PREDEFINED_CATEGORIES = ["NWO", "Tech", "weekend special"]
 PROJECTS_ROOT = Config.PROJECTS_ROOT
 DEFAULT_THUMBNAIL = "/static/default-thumbnail.jpg"
 DAILY_REPORT_DIR = Config.DAILY_REPORT_DIR
@@ -131,6 +133,18 @@ IST = pytz.timezone("Asia/Kolkata")
 # --- FastAPI App & Templates ---
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+
+def truncate_words(text, max_words=100):
+    if not text:
+        return text
+    words = text.split()
+    if len(words) > max_words:
+        return " ".join(words[:max_words]) + "..."
+    return text
+
+# Register the filter with your Jinja2Templates
+templates.env.filters["truncate_words"] = truncate_words
+
 
 # --- Database Setup ---
 def get_db_connection():

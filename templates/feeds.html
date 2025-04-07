@@ -58,7 +58,8 @@
             {{ item.published }} • <span class="font-semibold">{{ item.source }}</span>
           </p>
           
-          <p class="line-clamp-3 mb-4 text-sm">{{ item.description|safe }}</p>
+          <p class="line-clamp-3 mb-4 text-sm">{{ item.description|truncate_words(500)|safe }}</p>
+
           <!-- Icon Buttons -->
           <div class="mt-auto flex items-center justify-end space-x-2">
             <!-- Copy Link -->
