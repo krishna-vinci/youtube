@@ -134,6 +134,7 @@ IST = pytz.timezone("Asia/Kolkata")
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+
 def truncate_words(text, max_words=100):
     if not text:
         return text
