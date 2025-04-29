@@ -314,20 +314,54 @@ import pytz
 import logging
 import requests
 import feedparser
+from dateutil import parser as date_parser
 from newspaper import Article
 
-# IST tz
+# Indian Standard Time
 IST = pytz.timezone("Asia/Kolkata")
+
+def format_datetime(dt_input):
+    """
+    Accepts either:
+      • a timezone-aware datetime, or
+      • a date-string parsable by dateutil
+    Returns:
+      - "Today at HH:MM AM/PM"
+      - "Yesterday at HH:MM AM/PM"
+      - "Mon DD, YYYY - HH:MM AM/PM"
+      - or "No Date"
+    """
+    # datetime path
+    if isinstance(dt_input, datetime):
+        dt = dt_input if dt_input.tzinfo else IST.localize(dt_input)
+    else:
+        # string path
+        try:
+            dt = date_parser.parse(dt_input)
+            dt = dt if dt.tzinfo else IST.localize(dt)
+        except Exception:
+            return "No Date"
+
+    now = datetime.now(IST)
+    yesterday = now - timedelta(days=1)
+
+    if dt.date() == now.date():
+        return dt.strftime("Today at %I:%M %p")
+    elif dt.date() == yesterday.date():
+        return dt.strftime("Yesterday at %I:%M %p")
+    else:
+        return dt.strftime("%b %d, %Y - %I:%M %p")
+
 
 def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Unknown"):
     logging.debug("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
-        # fetch + parse
-        response = requests.get(rss_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
-        response.raise_for_status()
-        feed = feedparser.parse(response.content)
+        # 1) fetch + parse
+        resp = requests.get(rss_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.content)
 
-        # threshold logic unchanged…
+        # 2) threshold (unchanged)
         last_update = get_feed_last_update(rss_url)
         threshold = last_update if last_update else datetime.now(IST) - timedelta(days=2)
         new_last_update = threshold
@@ -339,45 +373,46 @@ def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Un
             title       = getattr(entry, "title", "Untitled")
             link        = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
-            # thumbnail logic unchanged…
+
+            # 3) thumbnail (unchanged)
             thumbnail_url = DEFAULT_THUMBNAIL
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
             elif "media_content" in entry:
                 thumbnail_url = entry.media_content[0].get("url")
 
-            # ─── NEW: pick real published time, with fallback ───
+            # 4) FORMAT FOR DISPLAY (exactly as before)
+            raw_published = getattr(entry, "published", None) or getattr(entry, "updated", None)
+            published_formatted = format_datetime(raw_published)
+
+            # 5) DETERMINE pub_dt for STORAGE & THRESHOLD
             struct = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
             if struct:
                 # struct_time is UTC
-                pub_dt_utc = datetime.fromtimestamp(time.mktime(struct), tz=pytz.utc)
-                pub_dt     = pub_dt_utc.astimezone(IST)
+                dt_utc = datetime.fromtimestamp(time.mktime(struct), tz=pytz.utc)
+                pub_dt = dt_utc.astimezone(IST)
             else:
-                # fallback to parsing the raw string
-                raw = getattr(entry, "published", None) or getattr(entry, "updated", None)
+                # fallback to parsing raw string
                 try:
-                    pub_dt = date_parser.parse(raw) if raw else None
-                    pub_dt = ensure_aware(pub_dt, IST)
+                    pub_dt = date_parser.parse(raw_published) if raw_published else None
+                    pub_dt = pub_dt if pub_dt and pub_dt.tzinfo else (IST.localize(pub_dt) if pub_dt else None)
                 except Exception:
                     pub_dt = None
 
-            # format for display
-            published_formatted = format_datetime(pub_dt) if pub_dt else "No date"
-            # ────────────────────────────────────────────────────────
-
-            # skip old items
+            # 6) skip old or undated entries
             if not pub_dt or pub_dt <= threshold:
                 continue
 
-            # update threshold
+            # 7) track newest time
             if pub_dt > new_last_update:
                 new_last_update = pub_dt
 
-            # dedupe + insert + notify (all unchanged)…
+            # 8) dedupe
             cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
             if cur.fetchone():
                 continue
 
+            # 9) fetch full content
             try:
                 art = Article(link, keep_article_html=True)
                 art.download(); art.parse()
@@ -386,6 +421,7 @@ def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Un
                 logging.exception("Error extracting content for %s", link)
                 article_content = None
 
+            # 10) insert
             cur.execute(
                 'INSERT INTO "YouTube-articles" '
                 '(title, link, description, thumbnail, published, published_datetime, category, content, source) '
@@ -394,19 +430,20 @@ def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Un
                  published_formatted, pub_dt, category, article_content, source_name)
             )
             conn.commit()
+
+            # 11) notify
             send_ntfy_notification(title, link, description, category, source_name)
 
         cur.close()
         conn.close()
 
-        # update feed‐state if we saw anything newer
+        # 12) update feed‐state
         if new_last_update > threshold:
             update_feed_last_update(rss_url, new_last_update)
             logging.info("Updated feed state for %s → %s", rss_url, new_last_update)
 
     except Exception as e:
-        logging.exception("Error parsing/storing feed for URL: %s | %s", rss_url, e)
-
+        logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
 
 
 def fetch_all_feeds_db():
