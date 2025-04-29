@@ -309,26 +309,27 @@ def format_datetime(dt_string):
 
 
 import time
+from datetime import datetime, timedelta
+import pytz
+import logging
+import requests
+import feedparser
+from newspaper import Article
 
-# Indian Standard Time
+# IST tz
 IST = pytz.timezone("Asia/Kolkata")
 
 def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Unknown"):
     logging.debug("Parsing feed URL: %s for category: %s", rss_url, category)
     try:
-        # 1) fetch and parse
-        headers_req = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(rss_url, headers=headers_req, timeout=10)
+        # fetch + parse
+        response = requests.get(rss_url, headers={'User-Agent':'Mozilla/5.0'}, timeout=10)
         response.raise_for_status()
         feed = feedparser.parse(response.content)
 
-        # 2) figure out our threshold
+        # threshold logic unchanged…
         last_update = get_feed_last_update(rss_url)
-        if last_update is None:
-            threshold = datetime.now(IST) - timedelta(days=2)
-        else:
-            threshold = last_update
-
+        threshold = last_update if last_update else datetime.now(IST) - timedelta(days=2)
         new_last_update = threshold
 
         conn = get_db_connection()
@@ -338,54 +339,53 @@ def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Un
             title       = getattr(entry, "title", "Untitled")
             link        = getattr(entry, "link", "#")
             description = getattr(entry, "summary", "No description available.")
-
-            # pick up thumbnail
-            thumbnail_url = None
+            # thumbnail logic unchanged…
+            thumbnail_url = DEFAULT_THUMBNAIL
             if "media_thumbnail" in entry:
                 thumbnail_url = entry.media_thumbnail[0].get("url")
             elif "media_content" in entry:
                 thumbnail_url = entry.media_content[0].get("url")
-            if not thumbnail_url:
-                thumbnail_url = DEFAULT_THUMBNAIL
 
-            # ────────────────────────────────────────────────────────
-            # NEW: derive a real datetime from published_parsed / updated_parsed
+            # ─── NEW: pick real published time, with fallback ───
             struct = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
             if struct:
-                # struct is in UTC; convert → datetime → IST
+                # struct_time is UTC
                 pub_dt_utc = datetime.fromtimestamp(time.mktime(struct), tz=pytz.utc)
                 pub_dt     = pub_dt_utc.astimezone(IST)
             else:
-                pub_dt = None
+                # fallback to parsing the raw string
+                raw = getattr(entry, "published", None) or getattr(entry, "updated", None)
+                try:
+                    pub_dt = date_parser.parse(raw) if raw else None
+                    pub_dt = ensure_aware(pub_dt, IST)
+                except Exception:
+                    pub_dt = None
 
             # format for display
             published_formatted = format_datetime(pub_dt) if pub_dt else "No date"
             # ────────────────────────────────────────────────────────
 
-            # skip old entries
+            # skip old items
             if not pub_dt or pub_dt <= threshold:
                 continue
 
-            # track the newest time
+            # update threshold
             if pub_dt > new_last_update:
                 new_last_update = pub_dt
 
-            # dedupe
+            # dedupe + insert + notify (all unchanged)…
             cur.execute('SELECT id FROM "YouTube-articles" WHERE link = %s', (link,))
-            if cur.fetchone() is not None:
+            if cur.fetchone():
                 continue
 
-            # try to scrape full content
             try:
                 art = Article(link, keep_article_html=True)
-                art.download()
-                art.parse()
+                art.download(); art.parse()
                 article_content = art.article_html or art.text
             except Exception:
-                logging.exception("Error extracting content for link %s", link)
+                logging.exception("Error extracting content for %s", link)
                 article_content = None
 
-            # insert
             cur.execute(
                 'INSERT INTO "YouTube-articles" '
                 '(title, link, description, thumbnail, published, published_datetime, category, content, source) '
@@ -394,20 +394,18 @@ def parse_and_store_rss_feed(rss_url: str, category: str, source_name: str = "Un
                  published_formatted, pub_dt, category, article_content, source_name)
             )
             conn.commit()
-
-            # notify
             send_ntfy_notification(title, link, description, category, source_name)
 
         cur.close()
         conn.close()
 
-        # update our feed‐state
+        # update feed‐state if we saw anything newer
         if new_last_update > threshold:
             update_feed_last_update(rss_url, new_last_update)
-            logging.info("Updated feed state for %s to %s", rss_url, new_last_update)
+            logging.info("Updated feed state for %s → %s", rss_url, new_last_update)
 
     except Exception as e:
-        logging.exception("Error parsing/storing feed for URL: %s | Error: %s", rss_url, e)
+        logging.exception("Error parsing/storing feed for URL: %s | %s", rss_url, e)
 
 
 
